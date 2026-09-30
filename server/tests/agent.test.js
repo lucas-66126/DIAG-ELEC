@@ -381,6 +381,50 @@ test('moteur local : convoyeur qui disjoncte par intermittence → pôle de KM3 
   assert.equal(DM.agent.analyzeSeries(DM.agent.parseMeasurements('13,1 A / 13,4 A / 13,2 A')).abnormal, false);
 });
 
+test('moteur local : alarme CPI intermittente en régime IT → humidité dans BJ2 sur le départ D2', async () => {
+  function answer(ask, d) {
+    const q = DM.normalize(ask.question || '');
+    const cd = ask.controlId ? DM.normalize(DM.findControl(d, ask.controlId).description) : '';
+    if (ask.kind === 'confirm') return 'Oui, confirmer';
+    if (/present en ce moment/.test(q)) return 'Oui, défaut présent';
+    if (/ouvrir successivement les departs/.test(cd)) return 'À 6h, alarme présente : D1 : pas de changement · D2 : CPI remonte à 280 kΩ · D3 : +30 kΩ seulement · D4, D5 : pas de changement';
+    if (/recepteur seul/.test(cd)) return 'Moteur P1 au mégohmmètre 1000 V, câble débranché : > 500 MΩ, bon';
+    if (/cable complet phase par phase/.test(cd)) return 'Câble D2 complet à 6h : Phase L2 : 22 kΩ · L1 et L3 : > 100 MΩ';
+    if (/generateur de recherche/.test(cd)) return 'Signal présent jusqu’à la boîte de jonction extérieure BJ2 (bord de fosse), absent après';
+    if (/inspecter la boite de jonction/.test(cd)) return 'BJ2 : presse-étoupe mal serré, traces de condensation et de vert-de-gris sur la borne L2, joint de couvercle écrasé';
+    throw new Error('Question inattendue : ' + ask.question + ' / ' + cd);
+  }
+  let d = newDiag();
+  let msg = 'Station de pompage eaux pluviales, réseau IT 400 V neutre isolé. Le CPI passe en pré-alarme presque tous les matins entre 5h et 8h, ' +
+    'parfois en alarme après une nuit de pluie, puis tout redevient normal vers 11h. Même pompes à l’arrêt si les départs restent sous tension. ' +
+    'Départs : D1 éclairage + prises, D2 pompe P1 démarreur progressif, D3 pompe P2 variateur installé il y a 1 mois, D4 dégrilleur, D5 ventilation + chauffage. ' +
+    'J’ai coupé le variateur de P2 un matin et la valeur est remontée, je pense que c’est le variateur.';
+  const asked = [];
+  for (let i = 0; i < 10; i++) {
+    userSays(d, msg);
+    const out = await DM.agent.runLocalTurn({ diag: d, services: {} });
+    d = out.diag;
+    if (d.verdict.status === 'confirme') { asked.push(out.reply); break; }
+    asked.push(out.ask.question);
+    msg = answer(out.ask, d);
+  }
+  assert.equal(d.installationType, 'electricite', 'un défaut CPI concerne l’installation, pas la pompe');
+  assert.equal(d.verdict.status, 'confirme');
+  assert.match(d.verdict.summary, /isolement.*D2, BJ2/);
+  assert.match(asked[asked.length - 1], /Réparation conseillée/);
+  const vfd = d.hypotheses.find(h => /variateur/.test(h.cause));
+  const heat = d.hypotheses.find(h => /chauffantes/.test(h.cause));
+  assert.equal(vfd.status, 'ecartee', 'fausse piste variateur écartée par l’ouverture de D3');
+  assert.equal(heat.status, 'ecartee', 'fausse piste chauffage écartée par l’ouverture de D5');
+  assert.equal(DM.findFact(d, 'Départ en défaut').answer.slice(0, 2), 'D2');
+  // la confirmation n'arrive qu'après l'inspection de BJ2
+  assert.ok(d.controls.some(c => /inspecter la boîte de jonction/.test(c.description) && DM.hasResult(c)));
+  // « > 100 MΩ » reste une valeur minimale, pas une valeur exacte
+  const ins = DM.agent.analyzeInsulation(DM.agent.parseMeasurements('Phase L2 : 22 kΩ · L1 et L3 : > 100 MΩ'));
+  assert.equal(ins.abnormal, true);
+  assert.match(ins.summary, /L2 à 22 kΩ.*L1 et L3 à > 100 MΩ/);
+});
+
 test('moteur local : « je ne sais pas » et piste écartée par un résultat conforme', async () => {
   let d = newDiag();
   for (const msg of ['Le moteur du convoyeur chauffe', 'Je ne sais pas', 'Je ne sais pas']) {

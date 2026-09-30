@@ -35,8 +35,41 @@
   };
   DM.symptomChips = function (type) { return (DM.SYMPTOM_CHIPS[type] || []).concat(COMMON_SYMPTOMS); };
 
-  function C(type, description, expected, why) { return { type: type, description: description, expected: expected, why: why || '' }; }
-  function H(cause, reason, keywords, controls) { return { cause: cause, reason: reason, keywords: keywords, controls: controls }; }
+  /**
+   * Contrôle type. opts.localize : contrôle de localisation — un résultat conforme ne contredit pas l'hypothèse,
+   * il resserre la zone de recherche (opts.onConform décrit ce qu'on en déduit).
+   */
+  function C(type, description, expected, why, opts) {
+    return Object.assign({ type: type, description: description, expected: expected, why: why || '' }, opts || {});
+  }
+
+  /* Régime IT : méthode de recherche d'un défaut d'isolement signalé par le CPI. */
+  const FEEDER_TEST = C('fonctionnel',
+    'Pendant que le défaut est présent (pré-alarme ou alarme), ouvrir successivement les départs du tableau principal un par un, en notant la valeur du CPI à chaque ouverture, puis refermer.',
+    'Aucun départ ne fait remonter nettement le CPI (sinon : le départ qui le fait remonter porte le défaut).',
+    'Identifier le départ en défaut sans rien démonter ; en IT, le premier défaut ne fait pas déclencher, on peut chercher en exploitation.',
+    { localize: true, feederTest: true, onConform: 'Aucun départ ne se détache : défaut en amont (TGBT) ou multiple.' });
+  function isolationFault() {
+    return H('Défaut d’isolement sur un départ (humidité, condensation, infiltration)',
+      'Un défaut d’isolement qui apparaît la nuit et le matin, s’aggrave après la pluie et disparaît quand il fait sec et chaud est typique d’une humidité ou d’une condensation dans une boîte de jonction, un câble ou un presse-étoupe. En IT, ce premier défaut doit être éliminé avant qu’un second défaut sur une autre phase ne provoque un court-circuit.',
+      ['cpi', 'controleur permanent', 'isolement', 'regime it', 'pre alarme', 'alarme', 'humid', 'pluie', 'matin', 'nuit', 'condensation', 'rosee', 'sec', 'intermitten', 'exterieur', 'fosse'],
+      [FEEDER_TEST,
+       C('hors_tension', 'Départ en défaut consigné : mesurer l’isolement du récepteur seul (moteur, appareil), câble débranché, au mégohmmètre (tension d’essai adaptée).', 'Isolement élevé (> 1 MΩ, typiquement plusieurs centaines de MΩ pour un moteur sain).',
+         'Séparer le récepteur du câble : savoir si le défaut est dans l’appareil ou dans la liaison.',
+         { localize: true, onConform: 'Récepteur sain : le défaut est dans le câble ou ses connexions.' }),
+       C('hors_tension', 'Départ consigné : mesurer l’isolement du câble complet phase par phase (du tableau jusqu’au récepteur), de préférence au moment où le défaut est présent.', 'Chaque phase > 1 MΩ par rapport à la terre.',
+         'Identifier la phase en défaut et confirmer que le câble est en cause.',
+         { localize: true, onConform: 'Câble sain au moment de la mesure : refaire la mesure quand le défaut est présent (tôt le matin).' }),
+       C('sous_tension', 'Localiser le défaut le long du câble avec le générateur de recherche et la pince : suivre le signal (coffrets, boîtes de jonction, traversées).', 'Signal suivi jusqu’au récepteur sans disparition anormale (sinon : le défaut est à l’endroit où le signal disparaît).',
+         'Trouver l’endroit précis du défaut avant d’ouvrir quoi que ce soit.',
+         { localize: true, onConform: 'Pas de point de disparition du signal : défaut probablement dans le récepteur ou diffus.' }),
+       C('visuel', 'Point localisé consigné : inspecter la boîte de jonction / le coffret (étanchéité, presse-étoupes, joints, condensation, oxydation des bornes).', 'Boîte étanche, sèche, bornes propres.',
+         'Constater la cause physique du défaut avant de réparer.')],
+      'Départ consigné : sécher et nettoyer la boîte de jonction, remplacer les bornes oxydées, le joint et le presse-étoupe (indice IP adapté à l’extérieur), ' +
+      'puis refaire la mesure d’isolement du câble — idéalement au moment où le défaut apparaissait (tôt le matin, après une nuit humide) — et suivre la valeur du CPI les jours suivants.');
+  }
+  /** Hypothèse type. advice : réparation conseillée une fois la cause confirmée (facultatif). */
+  function H(cause, reason, keywords, controls, advice) { return { cause: cause, reason: reason, keywords: keywords, controls: controls, advice: advice || '' }; }
 
   /* Déclenchements thermiques d'un moteur : la mesure du courant sur CHAQUE phase en régime établi départage
    * une surcharge mécanique (3 phases chargées) d'un défaut électrique localisé (une phase plus chargée). */
@@ -52,11 +85,24 @@
        C('sous_tension', 'Thermographie de l’armoire en charge : contacteurs, relais thermique, borniers.', 'Écart inférieur à 10 °C entre pôles comparables.',
          'Repérer le point de connexion ou le pôle qui chauffe.'),
        C('sous_tension', 'Mesurer en charge la chute de tension aux bornes de chaque pôle des contacteurs concernés (voltmètre, calibre adapté).', 'Quelques dizaines de mV, identique sur les trois pôles.',
-         'Confirmer un pôle résistant avant de remplacer le contacteur.')]);
+         'Confirmer un pôle résistant avant de remplacer le contacteur.')],
+      'Circuit consigné : remplacer le contacteur en cause (pas seulement le pôle), contrôler le serrage de ses connexions au couple, ' +
+      'puis refaire la mesure du courant par phase en charge et une thermographie après 40 minutes de marche. Ne pas augmenter le réglage du relais thermique pour « tenir ».');
   }
 
   const KB = {
     electricite: [
+      isolationFault(),
+      H('Courants de fuite capacitifs d’un variateur (filtre CEM)', 'Le filtre CEM d’un variateur (condensateurs vers la terre) crée des fuites capacitives qui abaissent la valeur lue par le CPI ; un variateur récent est souvent soupçonné.',
+        ['variateur', 'cem', 'filtre', 'recent', 'installe', 'cpi', 'isolement'],
+        [FEEDER_TEST,
+         C('visuel', 'Vérifier dans la notice du variateur si le filtre CEM doit être déconnecté en régime IT (cavalier / vis de mise à la terre du filtre).', 'Filtre CEM configuré pour un réseau IT.',
+           'En IT, un filtre CEM raccordé à la terre fausse la surveillance d’isolement.')]),
+      H('Défaut d’isolement de résistances chauffantes', 'Les résistances chauffantes (chauffage, antigel) sont une cause classique de défaut d’isolement, surtout après une période d’arrêt humide.',
+        ['chauffage', 'resistance', 'radiateur', 'antigel', 'isolement', 'cpi'],
+        [FEEDER_TEST,
+         C('hors_tension', 'Départ du chauffage consigné : mesurer l’isolement des résistances au mégohmmètre.', 'Isolement > 1 MΩ.',
+           'Écarter ou confirmer les résistances chauffantes.')]),
       H('Surcharge du circuit', 'Un courant absorbé supérieur au calibre provoque le déclenchement thermique de la protection.',
         ['disjonct', 'saute', 'declench', 'surcharge', 'chauffe', 'apres un moment'],
         [C('sous_tension', 'Mesurer le courant absorbé sur le circuit à la pince ampèremétrique, en charge.', 'Courant inférieur au calibre du disjoncteur (In).')]),

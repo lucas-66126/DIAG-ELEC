@@ -22,6 +22,8 @@
     'Bosch', 'Atlas Copco', 'Festo', 'SMC', 'Viessmann', 'De Dietrich', 'Saunier Duval', 'Frisquet'];
 
   const TYPE_RULES = [
+    // surveillance d'isolement : c'est l'installation électrique qui est en cause, pas la pompe ou la machine citée
+    ['electricite', ['cpi', 'controleur permanent', 'regime it', 'neutre isole', 'defaut d isolement']],
     ['hvac', ['clim', 'climatis', 'split', 'pac ', 'pompe a chaleur', 'groupe froid', 'cta', 'vmc', 'rooftop', 'unite exterieure', 'unite interieure', 'chaudiere']],
     ['incendie', ['ssi', 'incendie', 'desenfum', 'detecteur de fumee', 'ecs ', 'alarme incendie', 'declencheur manuel']],
     ['acces', ['badge', 'gache', 'ventouse', 'controle d acces', 'interphone', 'lecteur de badge', 'visiophone']],
@@ -33,7 +35,7 @@
     ['electricite', ['disjonct', 'differentiel', 'tableau', 'prise', 'eclairage', 'circuit', 'tgbt', 'fusible']]
   ];
 
-  const UNIT_RE = /(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
+  const UNIT_RE = /([<>≥≤]\s*)?(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
   const UNIT_NORM = { uf: 'µF', ohm: 'Ω', ohms: 'Ω', kohm: 'kΩ', kohms: 'kΩ', mohm: 'MΩ', mohms: 'MΩ', vac: 'V AC', vdc: 'V DC', 'v ac': 'V AC', 'v dc': 'V DC',
     degre: '°C', degres: '°C', 'degré': '°C', 'degrés': '°C' };
 
@@ -45,15 +47,18 @@
     let m;
     UNIT_RE.lastIndex = 0;
     while ((m = UNIT_RE.exec(src))) {
-      let unit = m[2];
+      let unit = m[3];
       const key = unit.toLowerCase();
       unit = UNIT_NORM[key] || unit.replace(/\s+/, ' ');
-      const before = src.slice(Math.max(0, m.index - 14), m.index);
-      const lab = before.match(/(L[123](?:\s?-\s?L?[123])?|[UVW][12]?(?:\s?-\s?[UVW][12]?)?|phase\s?\d|p[ôo]le\s?\d)\s*[:=]?\s*$/i);
-      out.push({ value: m[1], unit: unit, label: lab ? lab[1].replace(/\s+/g, '') : '' });
+      const before = src.slice(Math.max(0, m.index - 20), m.index);
+      const lab = before.match(/(L[123](?:\s?(?:-|et|,)\s?L?[123])*|[UVW][12]?(?:\s?-\s?[UVW][12]?)?|phase\s?\d|p[ôo]le\s?\d)\s*[:=]?\s*$/i);
+      // un comparateur (« > 100 MΩ ») est conservé : c'est une valeur minimale, pas une valeur exacte
+      const cmp = m[1] ? m[1].trim() : '';
+      out.push({ value: (cmp ? cmp + ' ' : '') + m[2], unit: unit, label: lab ? lab[1].replace(/\s+/g, ' ').trim() : '' });
     }
     return out;
   };
+  function num(v) { return parseFloat(String(v).replace(/[<>≥≤\s]/g, '').replace(',', '.')); }
 
   /**
    * Analyse d'une série de valeurs de même unité (courants par phase, chutes de tension par pôle, températures…).
@@ -64,7 +69,7 @@
     if (!measures || measures.length < 2) return null;
     const unit = measures[0].unit;
     if (!measures.every(function (x) { return x.unit === unit; })) return null;
-    const vals = measures.map(function (x) { return parseFloat(String(x.value).replace(',', '.')); });
+    const vals = measures.map(function (x) { return num(x.value); });
     if (vals.some(isNaN)) return null;
     const mean = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
     if (mean <= 0) return null;
@@ -93,7 +98,10 @@
 
   /** Libellé court d'une mesure d'après la description du contrôle (« Mesurer l'intensité absorbée par … (pince) » → « Intensité absorbée par … »). */
   function shortLabel(desc) {
+    if (/ouvrir successivement les d[ée]parts/i.test(desc)) return 'Ouverture successive des départs';
     let t = s(desc).replace(/^(unité consignée\s*:\s*)?/i, '')
+      .replace(/^pendant que[^,]*,\s*/i, '')
+      .replace(/^[^:]{0,45}consign[ée]+s?\s*:\s*/i, '')
       .replace(/^(mesurer|relever|contrôler|vérifier|tester|observer)\s+/i, '')
       .replace(/^(en charge|en fonctionnement|à vide)\s+/i, '')
       .replace(/^(la |le |les |l['’]|un |une |des )/i, '');
@@ -140,9 +148,68 @@
     return null;
   }
 
+  /** Valeur en MΩ d'une mesure de résistance / d'isolement (null si l'unité ne s'y prête pas). */
+  function toMOhm(m) {
+    const v = num(m.value);
+    const factor = { 'GΩ': 1000, 'MΩ': 1, 'kΩ': 1e-3, 'Ω': 1e-6, 'mΩ': 1e-9 }[m.unit];
+    return isNaN(v) || factor == null ? null : v * factor;
+  }
+
+  /** Isolement : conforme si toutes les valeurs ≥ 1 MΩ (seuil courant de la NF C 15-100 pour < 500 V ; ≥ 0,5 MΩ minimum légal). */
+  DM.agent.analyzeInsulation = function (measures) {
+    const vals = measures.map(function (m) { return { m: m, mo: toMOhm(m) }; }).filter(function (x) { return x.mo != null; });
+    if (!vals.length) return null;
+    const low = vals.filter(function (x) { return x.mo < 1; });
+    const fmt = function (x) { return (x.m.label ? x.m.label + ' à ' : '') + x.m.value + ' ' + x.m.unit; };
+    if (low.length) {
+      const ok = vals.filter(function (x) { return x.mo >= 1; });
+      return { abnormal: true, summary: 'Isolement insuffisant : ' + low.map(fmt).join(', ') + ' (< 1 MΩ)' + (ok.length ? ' ; ' + ok.map(fmt).join(', ') + ' correct' : '') + '.',
+        labels: low.map(function (x) { return x.m.label; }).filter(Boolean) };
+    }
+    return { abnormal: false, summary: 'Isolement correct : ' + vals.map(fmt).join(', ') + ' (≥ 1 MΩ).', labels: [] };
+  };
+
+  /**
+   * Résultat d'une ouverture successive des départs (régime IT) :
+   * « D1 : pas de changement · D2 : CPI remonte à 280 kΩ · D3 : +30 kΩ seulement · D4, D5 : pas de changement ».
+   * Le départ dont l'ouverture fait nettement remonter le CPI porte le défaut.
+   */
+  DM.agent.analyzeFeeders = function (text) {
+    const re = /((?:D\d+\s*(?:,|et)\s*)*D\d+)\s*:\s*([^·;\n]+)/gi;
+    const feeders = [];
+    let m;
+    while ((m = re.exec(String(text || '')))) {
+      const seg = m[2];
+      let kohm = 0, kind = 'none';
+      const abs = seg.match(/remonte\s*(?:à|a|jusqu['’]?à)?\s*(\d+(?:[.,]\d+)?)\s*(k|M)?Ω/i);
+      const delta = seg.match(/\+\s*(\d+(?:[.,]\d+)?)\s*(k|M)?Ω/i);
+      if (abs) { kohm = parseFloat(abs[1].replace(',', '.')) * (abs[2] === 'M' ? 1000 : 1); kind = 'absolu'; }
+      else if (delta) { kohm = parseFloat(delta[1].replace(',', '.')) * (delta[2] === 'M' ? 1000 : 1); kind = 'hausse'; }
+      m[1].split(/\s*(?:,|et)\s*/).forEach(function (id) { feeders.push({ id: id.toUpperCase(), kohm: kohm, kind: kind, text: seg.trim() }); });
+    }
+    if (feeders.length < 2) return null;
+    const best = feeders.slice().sort(function (a, b) { return b.kohm - a.kohm; })[0];
+    const second = feeders.filter(function (f) { return f !== best; }).sort(function (a, b) { return b.kohm - a.kohm; })[0];
+    // net : le meilleur départ fait remonter le CPI au moins 3 fois plus que le suivant
+    if (!best.kohm || (second && second.kohm * 3 > best.kohm)) return { found: null, feeders: feeders, summary: 'Aucun départ ne se détache nettement.' };
+    const others = feeders.filter(function (f) { return f !== best && f.kohm > 0; });
+    return {
+      found: best.id, feeders: feeders,
+      summary: 'L’ouverture de ' + best.id + ' fait remonter le CPI' + (best.kind === 'absolu' ? ' à ' + best.kohm + ' kΩ' : ' de ' + best.kohm + ' kΩ') +
+        ' : le défaut est sur ' + best.id + '.' +
+        (others.length ? ' ' + others.map(function (f) { return f.id + ' : ' + f.text; }).join(' ; ') + ' (effet faible, l’alarme reste).' : '')
+    };
+  };
+
+  /** Constats visuels qui signent un défaut (inspection, localisation). */
+  const FINDINGS = ['vert de gris', 'oxyd', 'condensation', 'humid', 'ruissel', 'mal serre', 'desserr', 'ecrase', 'brul', 'noirci', 'fissur',
+    'casse', 'absent apres', 'disparait', 'infiltration', 'corrod', 'eau dans', 'traces d eau'];
+
   /** Durée déjà indiquée dans la description (« 30 à 50 minutes », « après 5 min », « jusqu'à 11h »…). */
   const DURATION_RE = /(\d+\s*(?:(?:à|a|-)\s*\d+\s*)?(?:min(?:ute)?s?|h(?:eures?)?\b|s(?:econdes?)?\b))/i;
   function thermalTrip(n) { return has(n, ['thermique', 'relais thermique', 'defaut thermique']); }
+  /** Surveillance d'isolement (CPI, régime IT) : défaut d'installation, pas d'un matériel précis. */
+  function isolationMonitor(n) { return has(n, ['cpi', 'controleur permanent', 'regime it']); }
   const MOTOR_TYPES = ['moteur', 'electrotechnique', 'industriel', 'pompe'];
 
   /** Questions essentielles, posées une par une, uniquement si la réponse n'est ni connue ni déjà dans la description. */
@@ -156,14 +223,17 @@
     { id: 'code', question: 'Un code défaut est-il affiché (télécommande, carte électronique, écran) ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
       when: function (n, d) {
         return (['hvac', 'automatisme', 'incendie', 'acces'].indexOf(d.installationType) !== -1 || has(n, ['variateur', 'automate', 'ecran', 'carte'])) &&
-          !DM.extractErrorCodes(n).length;
+          !DM.extractErrorCodes(n).length && !isolationMonitor(n);
       } },
     { id: 'plaque_moteur', question: 'Quelles sont les données de la plaque moteur (puissance, intensité nominale, couplage / démarrage) et le réglage du relais thermique ?',
       choices: ['Je ne les ai pas'],
       when: function (n, d) { return MOTOR_TYPES.indexOf(d.installationType) !== -1 && thermalTrip(n); } },
+    { id: 'cpi_present', question: 'Le défaut est-il présent en ce moment (pré-alarme ou alarme sur le CPI) ? La recherche du départ en défaut se fait pendant qu’il est présent.',
+      choices: ['Oui, défaut présent', 'Non, valeur normale'],
+      when: function (n) { return isolationMonitor(n); } },
     { id: 'reference', question: 'Quelle est la référence exacte du matériel ? Tu peux aussi envoyer une photo de sa plaque signalétique.',
       choices: ['Je ne la trouve pas'],
-      when: function (n, d) { return !d.reference && !d.model && !(MOTOR_TYPES.indexOf(d.installationType) !== -1 && thermalTrip(n)); } }
+      when: function (n, d) { return !d.reference && !d.model && !(MOTOR_TYPES.indexOf(d.installationType) !== -1 && thermalTrip(n)) && !isolationMonitor(n); } }
   ];
 
   function LocalProvider() {
@@ -244,16 +314,18 @@
       notes.result = { controlId: ctl.id, verdict: verdict, obtained: obtained };
     } else if (ask && ask.kind === 'result' && ask.controlId && DM.findControl(d, ask.controlId)) {
       let ctl = DM.findControl(d, ask.controlId);
-      if (measures.length) {
+      const family = function (k) { return k === 'isolement' ? 'resistance' : k; };
+      const isFeederTest = /ouvrir successivement les departs/.test(DM.normalize(ctl.description));
+      if (measures.length && !isFeederTest) {
         // la valeur donnée ne correspond pas à la grandeur attendue : on cherche le contrôle qu'elle concerne
-        const k = DM.kindFromUnit(measures[0].unit);
-        const kinds = DM.controlMeasureKinds(ctl);
+        const k = family(DM.kindFromUnit(measures[0].unit));
+        const kinds = DM.controlMeasureKinds(ctl).map(family);
         if (kinds.length && kinds.indexOf(k) === -1) {
-          const alt = DM.pendingControls(d).find(function (c) { return DM.controlMeasureKinds(c).indexOf(k) !== -1; });
+          const alt = DM.pendingControls(d).find(function (c) { return DM.controlMeasureKinds(c).map(family).indexOf(k) !== -1; });
           if (alt) { ctl = alt; notes.relinked = alt.id; }
         }
       }
-      if (measures.length && !attachedMeasure) {
+      if (measures.length && !attachedMeasure && !isFeederTest) {
         measures.forEach(function (m) {
           calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: (m.label ? m.label + ' — ' : '') + shortLabel(ctl.description),
             value: m.value, unit: m.unit, location: ctl.location, control_id: ctl.id, source: 'technicien' } });
@@ -261,16 +333,31 @@
       }
       if (!DM.hasResult(ctl) && !attachedControl) {
         const v = verdictFrom(text);
-        // série de valeurs (par phase, par pôle…) : le verdict découle du calcul d'écart, sans rien inventer
-        const series = measures.length >= 2 ? DM.agent.analyzeSeries(measures) : null;
-        const expectsBalance = /équilibr|equilibr|écart|ecart|identique|homog/i.test(ctl.expected || '');
-        let sv = null;
-        if (series && series.abnormal) sv = 'non_conforme';
-        else if (series && expectsBalance) sv = 'conforme';
-        if (sv) {
-          const obtained = text + ' — ' + series.summary;
-          calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: obtained, verdict: sv, conclusion: series.summary } });
-          notes.result = { controlId: ctl.id, verdict: sv, obtained: obtained, series: series, unit: measures[0].unit };
+        const nt = DM.normText(text);
+        // interprétation automatique, uniquement à partir de ce que le technicien a écrit
+        let auto = null;
+        if (isFeederTest) {
+          const f = DM.agent.analyzeFeeders(text);
+          if (f) auto = { verdict: f.found ? 'non_conforme' : 'conforme', summary: f.summary, feeders: f };
+        }
+        if (!auto && measures.length && DM.controlMeasureKinds(ctl).indexOf('isolement') !== -1) {
+          const ins = DM.agent.analyzeInsulation(measures);
+          if (ins) auto = { verdict: ins.abnormal ? 'non_conforme' : 'conforme', summary: ins.summary, insulation: ins };
+        }
+        if (!auto && measures.length >= 2) {
+          // série de valeurs (par phase, par pôle…) : le verdict découle du calcul d'écart, sans rien inventer
+          const series = DM.agent.analyzeSeries(measures);
+          const expectsBalance = /équilibr|equilibr|écart|ecart|identique|homog/i.test(ctl.expected || '');
+          if (series && (series.abnormal || expectsBalance)) auto = { verdict: series.abnormal ? 'non_conforme' : 'conforme', summary: series.summary, series: series };
+        }
+        if (!auto && !measures.length && FINDINGS.some(function (k) { return DM.hasKeyword(nt, k); })) {
+          auto = { verdict: 'non_conforme', summary: 'Anomalie constatée.' };
+        }
+        if (auto) {
+          const obtained = auto.summary === 'Anomalie constatée.' ? text : text + ' — ' + auto.summary;
+          calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: obtained, verdict: auto.verdict, conclusion: auto.summary } });
+          notes.result = { controlId: ctl.id, verdict: auto.verdict, obtained: obtained, series: auto.series, feeders: auto.feeders,
+            insulation: auto.insulation, summary: auto.summary, unit: measures.length ? measures[0].unit : '' };
         } else if (v && !measures.length) {
           calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: text, verdict: v } });
           notes.result = { controlId: ctl.id, verdict: v, obtained: text };
@@ -281,9 +368,12 @@
       const h = DM.findHyp(d, ask.hypothesisId);
       if (yes === true) {
         // repères de composants cités dans les preuves (KM3, Q1, F2…) : le diagnostic nomme l'élément en cause
+        // départ identifié + repères cités dans les deux dernières preuves (la localisation progresse de preuve en preuve)
         const tags = [];
-        h.evidence.forEach(function (e) {
-          (e.text.match(/\b(?:KM|KA|K|Q|F|QF|X)\d{1,3}\b/g) || []).forEach(function (t) { if (tags.indexOf(t) === -1) tags.push(t); });
+        const feeder = DM.findFact(d, 'Départ en défaut');
+        if (feeder) tags.push(feeder.answer.split(/\s/)[0]);
+        h.evidence.slice(-2).forEach(function (e) {
+          (e.text.match(/\b(?:KM|KA|K|Q|QF|F|X|BJ|BD|CJ)\d{1,3}\b/g) || []).forEach(function (t) { if (tags.indexOf(t) === -1) tags.push(t); });
         });
         const summary = h.cause + (tags.length ? ' — ' + tags.join(', ') : '');
         calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'confirmee', justification: 'Confirmée par le technicien après des contrôles non conformes concordants.' } });
@@ -384,6 +474,28 @@
       });
       if (localized.length && (!h || /surcharge/.test(DM.normalize(h.cause)))) h = localized[0];
     }
+
+    // ouverture successive des départs (IT) : le départ en défaut est identifié ; les pistes liées aux départs sains sont écartées
+    if (r.feeders && r.feeders.found) {
+      const self = this;
+      const segs = feederSegments([d.description, d.symptoms].concat(d.facts.map(function (f) { return f.answer; })).join('\n'));
+      const healthy = r.feeders.feeders.filter(function (f) { return f.id !== r.feeders.found; });
+      const discarded = [];
+      alive.forEach(function (x) {
+        const words = subjectWords(x.cause);
+        if (!words.length) return;
+        const f = healthy.find(function (hf) { return segs[hf.id] && words.some(function (w) { return DM.hasKeyword(DM.normText(segs[hf.id]), w); }); });
+        if (!f) return;
+        calls.push({ name: 'upsert_hypothesis', input: { id: x.id, status: 'ecartee',
+          counter_evidence_add: ['Ouverture de ' + f.id + ' (' + segs[f.id] + ') : ' + f.text + ' — le défaut n’est pas sur ce départ.'],
+          justification: 'Le départ ' + f.id + ' n’est pas celui qui porte le défaut.' } });
+        discarded.push(x.id);
+        (self.notes.discardedList = self.notes.discardedList || []).push(x.cause + ' (' + f.id + ' : ' + f.text + ')');
+      });
+      calls.push({ name: 'record_fact', input: { question: 'Départ en défaut', answer: r.feeders.found + (segs[r.feeders.found] ? ' — ' + segs[r.feeders.found] : ''), source: 'mesure' } });
+      const target = alive.find(function (x) { return discarded.indexOf(x.id) === -1 && /isolement/.test(DM.normalize(x.cause)) && !subjectWords(x.cause).length; });
+      if (target) h = target;
+    }
     if (!h) return { calls: calls };
 
     if (r.verdict === 'non_conforme') {
@@ -395,18 +507,47 @@
       const remaining = tpl ? tpl.controls.filter(function (c) { return done.indexOf(DM.normalize(c.description)) === -1; }).length : 0;
       calls.push({ name: 'set_diagnosis_status', input: { status: 'probable', summary: h.cause,
         missing: remaining ? ['Contrôle complémentaire pour confirmer « ' + h.cause + ' »'] : ['Confirmation de la cause « ' + h.cause + ' »'] } });
-      // on ne propose de confirmer qu'une fois le contrôle de confirmation prévu réalisé (ou 3 éléments concordants) :
-      // jamais de réparation définitive sur un simple faisceau d'indices
-      if (nonConf >= 3 || !remaining) this.notes.toConfirm = h.id;
+      // on ne propose de confirmer qu'une fois tous les contrôles prévus pour cette piste réalisés
+      // (le dernier est le contrôle de confirmation) : jamais de réparation définitive sur un simple faisceau d'indices
+      if (!remaining) this.notes.toConfirm = h.id;
       else this.notes.suspect = h.id;
+      this.notes.nonConf = nonConf;
     } else if (r.verdict === 'conforme') {
-      const others = DM.controlsOf(d, h.id).filter(function (x) { return x.id !== ctl.id && !DM.hasResult(x); });
-      const input = { id: h.id, counter_evidence_add: [fact + ' (conforme)'] };
-      if (!others.length) { input.status = 'ecartee'; input.justification = 'Contrôle conforme : ' + r.obtained; this.notes.discarded = h.cause; }
-      calls.push({ name: 'upsert_hypothesis', input: input });
+      const tpl = findTemplate(this, h);
+      const tctl = tpl ? tpl.controls.find(function (c) { return DM.normalize(c.description) === DM.normalize(ctl.description); }) : null;
+      if (tctl && tctl.localize) {
+        // contrôle de localisation : un résultat sain resserre la zone de recherche, il ne contredit pas la piste
+        calls.push({ name: 'upsert_hypothesis', input: { id: h.id, evidence_add: [fact + ' → ' + tctl.onConform] } });
+        this.notes.localized = tctl.onConform;
+      } else {
+        const others = DM.controlsOf(d, h.id).filter(function (x) { return x.id !== ctl.id && !DM.hasResult(x); });
+        const input = { id: h.id, counter_evidence_add: [fact + ' (conforme)'] };
+        if (!others.length) { input.status = 'ecartee'; input.justification = 'Contrôle conforme : ' + r.obtained; this.notes.discarded = h.cause; }
+        calls.push({ name: 'upsert_hypothesis', input: input });
+      }
     }
     return { calls: calls };
   };
+
+  /** Description de chaque départ citée par le technicien : « D3 pompe P2 variateur… » → {D3: 'pompe P2 variateur…'} */
+  function feederSegments(text) {
+    const out = {};
+    const re = /\b(D\d+)\s*[:=\-–]?\s*([^,;\n·]+)/g;
+    let m;
+    while ((m = re.exec(String(text || '')))) {
+      const seg = m[2].trim().replace(/[.\s]+$/, '');
+      if (!out[m[1].toUpperCase()] && seg && !/^\d/.test(seg)) out[m[1].toUpperCase()] = seg;
+    }
+    return out;
+  }
+  /** Mots qui désignent le « sujet » matériel d'une hypothèse (variateur, chauffage…), pour la rattacher à un départ. */
+  function subjectWords(cause) {
+    const n = DM.normalize(cause);
+    if (/variateur|cem/.test(n)) return ['variateur'];
+    if (/chauff|resistance|radiateur/.test(n)) return ['chauffage', 'chauff', 'radiateur', 'resistance'];
+    if (/eclairage/.test(n)) return ['eclairage'];
+    return [];
+  }
 
   /** Modèle de la base de pannes correspondant à une hypothèse (par sa cause). */
   function findTemplate(self, h) {
@@ -491,10 +632,18 @@
 
     if (notes.confirmed) {
       const h = DM.findHyp(d, notes.confirmed);
-      parts.push('✅ **Diagnostic confirmé : ' + (d.verdict.summary || h.cause) + '.**\nTu peux procéder à la réparation. Décris-moi ensuite ce qui a été fait (pièces remplacées, réglages) ; le rapport est prêt à être généré.');
+      const tplC = findTemplate(this, h);
+      parts.push('✅ **Diagnostic confirmé : ' + (d.verdict.summary || h.cause) + '.**' +
+        (tplC && tplC.advice ? '\n**Réparation conseillée :** ' + tplC.advice : '') + '\nTu peux procéder à la réparation. Décris-moi ensuite ce qui a été fait (pièces remplacées, réglages) ; le rapport est prêt à être généré.');
       return this.finish(parts, null);
     }
-    if (notes.result && notes.result.series) parts.push('📏 ' + notes.result.series.summary);
+    if (notes.result && notes.result.summary && notes.result.summary !== 'Anomalie constatée.') {
+      parts.push((notes.result.feeders ? '🔎 ' : '📏 ') + notes.result.summary);
+    }
+    if (notes.discardedList && notes.discardedList.length) {
+      parts.push('Pistes **écartées** :\n' + notes.discardedList.map(function (t) { return '- ' + t; }).join('\n'));
+    }
+    if (notes.localized) parts.push('Résultat sain : ' + notes.localized);
     if (notes.suspect && !notes.toConfirm) {
       const hs = DM.findHyp(d, notes.suspect);
       parts.push('Résultat **non conforme** : la piste « ' + hs.cause + ' » devient **suspectée**. Un contrôle complémentaire va la confirmer ou l’écarter.');
@@ -504,13 +653,21 @@
     if (notes.toConfirm) {
       const h = DM.findHyp(d, notes.toConfirm);
       parts.push('Résultat **non conforme** : l’hypothèse « ' + h.cause + ' » devient **suspectée** (diagnostic probable).');
-      if (h.evidence.length > 1) parts.push('Éléments concordants :\n' + h.evidence.map(function (e) { return '- ' + e.text; }).join('\n'));
+      // version courte pour le téléphone (le détail complet est dans le panneau et le rapport)
+      if (h.evidence.length > 1) {
+        parts.push('Éléments concordants :\n' + h.evidence.map(function (e) {
+          const t = e.text.replace(/^Contrôle « ([^»]+) » : /, '$1 : ');
+          const cut = t.indexOf(' — ');
+          const short = cut > 0 ? t.slice(0, t.indexOf(':') + 1) + ' ' + t.slice(cut + 3) : t;
+          return '- ' + (short.length > 150 ? short.slice(0, 147) + '…' : short);
+        }).join('\n'));
+      }
       ask = { question: 'Ce résultat suffit-il à expliquer la panne ? Si oui, je la confirme.', choices: ['Oui, confirmer', 'Non, continuer'], kind: 'confirm' };
       ask.hypothesisId = h.id;
       return this.finish(parts, ask);
     }
     if (notes.discarded) parts.push('Résultat conforme : je **écarte** la piste « ' + notes.discarded + ' ».');
-    else if (notes.result && notes.result.verdict === 'conforme') parts.push('Résultat conforme, noté.');
+    else if (notes.result && notes.result.verdict === 'conforme' && !notes.localized) parts.push('Résultat conforme, noté.');
     if (notes.notConfirmed) parts.push('D’accord, je ne confirme pas encore : poursuivons les contrôles.');
 
     if (notes.awaitVerdict) {

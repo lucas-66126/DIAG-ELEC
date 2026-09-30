@@ -48,7 +48,11 @@
     { k: ['batterie'], level: 'warning', t: 'Batteries : risque de court-circuit et d’arc, outils isolés, retirer les bijoux, attention à l’électrolyte.' },
     { k: ['400', 'tgbt', 'jeu de barres', 'hta'], level: 'danger', t: 'Énergie élevée (TGBT, 400 V, jeu de barres) : risque d’arc électrique, EPI arc flash adaptés.' },
     { k: ['hauteur', 'toiture', 'echelle', 'nacelle'], level: 'warning', t: 'Travail en hauteur : protection collective ou harnais, moyen d’accès adapté.' },
-    { k: ['extinction', 'co2', 'gaz inerte', 'sprinkler'], level: 'danger', t: 'Extinction automatique : condamner le déclenchement (inhibition / position manuelle) avant tout essai.' }
+    { k: ['extinction', 'co2', 'gaz inerte', 'sprinkler'], level: 'danger', t: 'Extinction automatique : condamner le déclenchement (inhibition / position manuelle) avant tout essai.' },
+    { k: ['ouvrir successivement', 'ouvrir les departs', 'ouverture successive'], level: 'warning',
+      t: 'Ouvrir un départ arrête tout ce qu’il alimente : prévenir l’exploitant (station de pompage : risque de débordement, process : arrêt de production), un seul départ à la fois, refermer aussitôt, manœuvres réservées au personnel habilité.' },
+    { k: ['generateur de recherche', 'injection'], level: 'warning',
+      t: 'Générateur de recherche : l’utiliser selon la notice sur réseau IT, pinces autour des conducteurs actifs uniquement, sans ouvrir de coffret sous tension sans habilitation.' }
   ];
 
   /** Domaines comportant des interventions électriques : rappel de consignation permanent. */
