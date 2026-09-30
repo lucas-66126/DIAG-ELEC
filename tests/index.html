@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DIAG-MAINT — Tests</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; background: Canvas; color: CanvasText; }
+    h1 { font-size: 1.2rem; }
+    #summary { font-weight: 700; padding: 10px; border-radius: 8px; margin: 10px 0; }
+    .ok { color: #1d8348; } .ko { color: #c0392b; }
+    #summary.ok { background: #1d834822; } #summary.ko { background: #c0392b22; }
+    li { margin: 2px 0; } pre { white-space: pre-wrap; margin: 2px 0 6px 18px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>DIAG-MAINT — tests unitaires</h1>
+  <div id="summary">Exécution…</div>
+  <ul id="results"></ul>
+  <script src="../js/utils.js"></script>
+  <script src="../js/icons.js"></script>
+  <script src="../js/safety.js"></script>
+  <script src="../js/knowledge.js"></script>
+  <script src="../js/model.js"></script>
+  <script src="../js/report.js"></script>
+  <script src="../js/store.js"></script>
+  <script src="tests.js"></script>
+</body>
+</html>
