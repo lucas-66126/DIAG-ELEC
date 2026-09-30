@@ -425,6 +425,59 @@ test('moteur local : alarme CPI intermittente en régime IT → humidité dans B
   assert.match(ins.summary, /L2 à 22 kΩ.*L1 et L3 à > 100 MΩ/);
 });
 
+test('moteur local : SSI, dérangements intermittents boucle 2 → câble blessé au R+2 (tronçon 2.31 à 2.39)', async () => {
+  function answer(ask, d) {
+    const cd = ask.controlId ? DM.normalize(DM.findControl(d, ask.controlId).description) : '';
+    if (ask.kind === 'confirm') return 'Oui, confirmer';
+    if (ask.kind === 'verdict') return 'Non conforme';
+    if (/historique/.test(cd)) return 'Historique ECS : défaut terre boucle 2 : 214 occurrences en 5 semaines · court-circuit : tous entre 6h30-6h35 et 13h00-13h05 en semaine';
+    if (/troncon par troncon/.test(cd)) return 'Tronçons 2.01 à 2.30 et 2.40 à 2.64 : bons · Tronçon 2.31 à 2.39 : défaut';
+    if (/isolateurs de court/.test(cd)) return 'Les isolateurs qui s’ouvrent lors du court-circuit encadrent le tronçon 2.30 à 2.40';
+    if (/resistance de boucle/.test(cd)) return 'Résistance de boucle 2, A+ à B+ : 18,4 Ω, conforme à la notice';
+    if (/isolement de chaque conducteur/.test(cd)) return 'Isolement boucle 2 / terre, mégohmmètre 500 V, boucle déconnectée : conducteur + : > 100 MΩ · conducteur − : 0,8 à 40 MΩ, valeur instable';
+    if (/cheminement du cable/.test(cd)) return 'Faux plafond R+2 Est : le câble de boucle passe sous le support d’un rail de luminaire neuf. Une vis de fixation a traversé la gaine du câble. Le support est fixé contre la gaine de la CTA qui vibre au démarrage.';
+    if (/aerosol/.test(cd)) return 'Tous les détecteurs du tronçon fonctionnent';
+    throw new Error('Question inattendue : ' + ask.question + ' / ' + cd);
+  }
+  let d = newDiag();
+  let msg = 'SSI catégorie A, ECS adressable + CMSI, ERP. 3 boucles adressables rebouclées classe A, isolateurs tous les 8 à 10 points. ' +
+    'L’ECS affiche des dérangements sur la boucle 2 plusieurs fois par jour : défaut terre, boucle ouverte, et 9 détecteurs du R+2 disparaissent puis reviennent 1 ou 2 minutes plus tard. ' +
+    'Court-circuit boucle 2 vers 6h30 et 13h00 (démarrage de la CTA du R+2). Le week-end, CTA à l’arrêt, seul le défaut terre apparaît. ' +
+    'Travaux au R+2 il y a 5 semaines : faux plafonds, luminaires. Fausse alarme feu au R+1 la semaine dernière (salle de pause). Mise à jour logicielle ECS il y a 2 mois.';
+  let last = '';
+  for (let i = 0; i < 12; i++) {
+    userSays(d, msg);
+    const out = await DM.agent.runLocalTurn({ diag: d, services: {} });
+    d = out.diag;
+    last = out.reply;
+    if (d.verdict.status === 'confirme') break;
+    msg = answer(out.ask, d);
+  }
+  assert.equal(d.installationType, 'incendie', 'la CTA citée ne doit pas faire classer le cas en climatisation');
+  assert.equal(d.verdict.status, 'confirme');
+  assert.match(d.verdict.summary, /Câble de boucle endommagé.*Tronçon 2\.31 à 2\.39/);
+  assert.doesNotMatch(d.verdict.summary, /Historique/);
+  // la tension d'essai du mégohmmètre (500 V) n'est pas une mesure ; le conducteur − instable est en défaut
+  assert.ok(!d.measurements.some(m => m.unit === 'V'), 'la tension d’essai n’est pas enregistrée comme mesure');
+  assert.ok(d.controls.some(c => /isolement de chaque conducteur/.test(c.description) && c.verdict === 'non_conforme'));
+  assert.match(last, /Réparation conseillée.*registre de sécurité/s);
+  assert.match(last, /à traiter séparément.*Détecteur encrassé/s, 'la fausse alarme du R+1 est signalée comme problème distinct');
+});
+
+test('garde-fou unités : une valeur d’une autre grandeur n’est jamais rattachée au contrôle en cours', async () => {
+  let d = newDiag();
+  d.installationType = 'hvac';
+  const c = DM.addControl(d, { type: 'sous_tension', description: 'Mesurer l’intensité absorbée par le compresseur', proposedBy: 'agent' });
+  DM.addMessage(d, { role: 'assistant', text: 'Contrôle n°1', ask: { question: 'Valeur ?', choices: [], kind: 'result', controlId: c.id }, controlId: c.id });
+  userSays(d, 'Batteries 4 ans, 25,9 V sous charge');
+  d = (await DM.agent.runLocalTurn({ diag: d, services: {} })).diag;
+  assert.equal(DM.findControl(d, c.id).doneAt, null, 'le contrôle d’intensité n’a pas de résultat');
+  const m = d.measurements.find(x => x.value === '25,9');
+  assert.equal(m.controlId, null, 'la tension est notée à part');
+  const reply = d.messages[d.messages.length - 1];
+  assert.equal(reply.ask.controlId, c.id, 'le contrôle en cours est redemandé');
+});
+
 test('moteur local : « je ne sais pas » et piste écartée par un résultat conforme', async () => {
   let d = newDiag();
   for (const msg of ['Le moteur du convoyeur chauffe', 'Je ne sais pas', 'Je ne sais pas']) {

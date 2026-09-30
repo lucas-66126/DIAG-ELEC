@@ -25,7 +25,7 @@
     // surveillance d'isolement : c'est l'installation électrique qui est en cause, pas la pompe ou la machine citée
     ['electricite', ['cpi', 'controleur permanent', 'regime it', 'neutre isole', 'defaut d isolement']],
     ['hvac', ['clim', 'climatis', 'split', 'pac ', 'pompe a chaleur', 'groupe froid', 'cta', 'vmc', 'rooftop', 'unite exterieure', 'unite interieure', 'chaudiere']],
-    ['incendie', ['ssi', 'incendie', 'desenfum', 'detecteur de fumee', 'ecs ', 'alarme incendie', 'declencheur manuel']],
+    ['incendie', ['ssi', 'incendie', 'desenfum', 'detecteur', 'ecs', 'cmsi', 'alarme incendie', 'alarme feu', 'declencheur manuel', 'boucle de detection', 'boucles adressables', 'isolateur', 'erp']],
     ['acces', ['badge', 'gache', 'ventouse', 'controle d acces', 'interphone', 'lecteur de badge', 'visiophone']],
     ['pompe', ['pompe', 'surpresseur', 'relevage', 'circulateur']],
     ['automatisme', ['automate', 'api ', 'plc', 'ihm', 'hmi', 'profinet', 'modbus']],
@@ -35,7 +35,7 @@
     ['electricite', ['disjonct', 'differentiel', 'tableau', 'prise', 'eclairage', 'circuit', 'tgbt', 'fusible']]
   ];
 
-  const UNIT_RE = /([<>≥≤]\s*)?(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
+  const UNIT_RE = /([<>≥≤]\s*)?(?:(\d+(?:[.,]\d+)?)\s*(?:à|-)\s*)?(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
   const UNIT_NORM = { uf: 'µF', ohm: 'Ω', ohms: 'Ω', kohm: 'kΩ', kohms: 'kΩ', mohm: 'MΩ', mohms: 'MΩ', vac: 'V AC', vdc: 'V DC', 'v ac': 'V AC', 'v dc': 'V DC',
     degre: '°C', degres: '°C', 'degré': '°C', 'degrés': '°C' };
 
@@ -47,14 +47,16 @@
     let m;
     UNIT_RE.lastIndex = 0;
     while ((m = UNIT_RE.exec(src))) {
-      let unit = m[3];
+      let unit = m[4];
       const key = unit.toLowerCase();
       unit = UNIT_NORM[key] || unit.replace(/\s+/, ' ');
       const before = src.slice(Math.max(0, m.index - 20), m.index);
-      const lab = before.match(/(L[123](?:\s?(?:-|et|,)\s?L?[123])*|[UVW][12]?(?:\s?-\s?[UVW][12]?)?|phase\s?\d|p[ôo]le\s?\d)\s*[:=]?\s*$/i);
-      // un comparateur (« > 100 MΩ ») est conservé : c'est une valeur minimale, pas une valeur exacte
+      const lab = before.match(/(L[123](?:\s?(?:-|et|,)\s?L?[123])*|[UVW][12]?(?:\s?-\s?[UVW][12]?)?|phase\s?\d|p[ôo]le\s?\d|conducteur\s?[+\-−])\s*[:=]?\s*$/i);
+      // un comparateur (« > 100 MΩ ») est conservé : c'est une valeur minimale, pas une valeur exacte ;
+      // une plage (« 0,8 à 40 MΩ ») est conservée telle quelle, sa valeur basse compte pour l'analyse
       const cmp = m[1] ? m[1].trim() : '';
-      out.push({ value: (cmp ? cmp + ' ' : '') + m[2], unit: unit, label: lab ? lab[1].replace(/\s+/g, ' ').trim() : '' });
+      const value = m[2] ? m[2] + ' à ' + m[3] : (cmp ? cmp + ' ' : '') + m[3];
+      out.push({ value: value, unit: unit, label: lab ? lab[1].replace(/\s+/g, ' ').trim() : '' });
     }
     return out;
   };
@@ -111,9 +113,14 @@
   }
   function noDot(t) { return s(t).replace(/[.\s]+$/, ''); }
 
+  /** Type d'installation : celui qui cumule le plus d'indices (à égalité, l'ordre des règles départage). */
   function detectType(n) {
-    for (let i = 0; i < TYPE_RULES.length; i++) if (has(n, TYPE_RULES[i][1])) return TYPE_RULES[i][0];
-    return null;
+    let best = null, bestScore = 0;
+    TYPE_RULES.forEach(function (r) {
+      const score = r[1].filter(function (k) { return DM.hasKeyword(n, k); }).length;
+      if (score > bestScore) { best = r[0]; bestScore = score; }
+    });
+    return best;
   }
   function detectBrand(text) {
     const n = DM.normText(text);
@@ -142,8 +149,10 @@
   }
   function verdictFrom(text) {
     const n = DM.normText(text);
-    if (has(n, ['non conforme', 'pas conforme', 'hors tolerance', 'anormal', 'mauvais', 'hs '])) return 'non_conforme';
-    if (has(n, ['conforme', 'normal', 'bon ', 'ok '])) return 'conforme';
+    if (has(n, ['non conforme', 'pas conforme', 'hors tolerance', 'anormal', 'mauvais', 'hs ', 'ne fonctionne pas', 'instable'])) return 'non_conforme';
+    // « Tronçon 2.31 à 2.39 : défaut » : le technicien signale lui-même un défaut
+    if (/:\s*(?:en\s+)?d[ée]faut\b/i.test(text)) return 'non_conforme';
+    if (has(n, ['conforme', 'normal', 'bon ', 'bons ', 'ok ', 'fonctionnent', 'fonctionne correctement', 'fonctionne parfaitement', 'sain '])) return 'conforme';
     if (has(n, ['je ne sais pas', 'sais pas', 'indetermine'])) return 'indetermine';
     return null;
   }
@@ -203,13 +212,18 @@
 
   /** Constats visuels qui signent un défaut (inspection, localisation). */
   const FINDINGS = ['vert de gris', 'oxyd', 'condensation', 'humid', 'ruissel', 'mal serre', 'desserr', 'ecrase', 'brul', 'noirci', 'fissur',
-    'casse', 'absent apres', 'disparait', 'infiltration', 'corrod', 'eau dans', 'traces d eau'];
+    'casse', 'absent apres', 'disparait', 'infiltration', 'corrod', 'eau dans', 'traces d eau', 'traverse', 'perce', 'blesse', 'abime',
+    'endommag', 'denude', 'frotte', 'pince', 'coince', 'arrache', 'sectionn'];
 
   /** Durée déjà indiquée dans la description (« 30 à 50 minutes », « après 5 min », « jusqu'à 11h »…). */
   const DURATION_RE = /(\d+\s*(?:(?:à|a|-)\s*\d+\s*)?(?:min(?:ute)?s?|h(?:eures?)?\b|s(?:econdes?)?\b))/i;
   function thermalTrip(n) { return has(n, ['thermique', 'relais thermique', 'defaut thermique']); }
   /** Surveillance d'isolement (CPI, régime IT) : défaut d'installation, pas d'un matériel précis. */
   function isolationMonitor(n) { return has(n, ['cpi', 'controleur permanent', 'regime it']); }
+  /** Défaut de boucle / ligne de détection (SSI) : défaut de câblage, pas d'un appareil précis. */
+  function loopFault(n) { return has(n, ['boucle', 'defaut terre', 'isolateur', 'ligne de detection']) && has(n, ['ssi', 'ecs', 'detecteur', 'detection', 'incendie']); }
+  /** Défaut d'installation (réseau, boucle) : les questions « référence » et « code défaut » n'aident pas. */
+  function installationFault(n) { return isolationMonitor(n) || loopFault(n); }
   const MOTOR_TYPES = ['moteur', 'electrotechnique', 'industriel', 'pompe'];
 
   /** Questions essentielles, posées une par une, uniquement si la réponse n'est ni connue ni déjà dans la description. */
@@ -223,7 +237,7 @@
     { id: 'code', question: 'Un code défaut est-il affiché (télécommande, carte électronique, écran) ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
       when: function (n, d) {
         return (['hvac', 'automatisme', 'incendie', 'acces'].indexOf(d.installationType) !== -1 || has(n, ['variateur', 'automate', 'ecran', 'carte'])) &&
-          !DM.extractErrorCodes(n).length && !isolationMonitor(n);
+          !DM.extractErrorCodes(n).length && !installationFault(n);
       } },
     { id: 'plaque_moteur', question: 'Quelles sont les données de la plaque moteur (puissance, intensité nominale, couplage / démarrage) et le réglage du relais thermique ?',
       choices: ['Je ne les ai pas'],
@@ -233,7 +247,7 @@
       when: function (n) { return isolationMonitor(n); } },
     { id: 'reference', question: 'Quelle est la référence exacte du matériel ? Tu peux aussi envoyer une photo de sa plaque signalétique.',
       choices: ['Je ne la trouve pas'],
-      when: function (n, d) { return !d.reference && !d.model && !(MOTOR_TYPES.indexOf(d.installationType) !== -1 && thermalTrip(n)) && !isolationMonitor(n); } }
+      when: function (n, d) { return !d.reference && !d.model && !(MOTOR_TYPES.indexOf(d.installationType) !== -1 && thermalTrip(n)) && !installationFault(n); } }
   ];
 
   function LocalProvider() {
@@ -317,21 +331,37 @@
       const family = function (k) { return k === 'isolement' ? 'resistance' : k; };
       const isFeederTest = /ouvrir successivement les departs/.test(DM.normalize(ctl.description));
       if (measures.length && !isFeederTest) {
+        // plusieurs valeurs dans le message : seules celles de la grandeur du contrôle comptent
+        // (« au mégohmmètre 500 V » est la tension d'essai, pas le résultat)
+        const ctlKinds = DM.controlMeasureKinds(ctl).map(family);
+        const relevant = measures.filter(function (m) { return ctlKinds.indexOf(family(DM.kindFromUnit(m.unit))) !== -1; });
+        if (ctlKinds.length && relevant.length) measures.splice(0, measures.length, ...relevant);
         // la valeur donnée ne correspond pas à la grandeur attendue : on cherche le contrôle qu'elle concerne
         const k = family(DM.kindFromUnit(measures[0].unit));
         const kinds = DM.controlMeasureKinds(ctl).map(family);
         if (kinds.length && kinds.indexOf(k) === -1) {
           const alt = DM.pendingControls(d).find(function (c) { return DM.controlMeasureKinds(c).map(family).indexOf(k) !== -1; });
           if (alt) { ctl = alt; notes.relinked = alt.id; }
+          else {
+            // aucune grandeur ne correspond : la valeur est notée à part, jamais rattachée au mauvais contrôle
+            notes.unitMismatch = { ctl: ctl, unit: measures[0].unit, kind: DM.MEASURE_KINDS[DM.kindFromUnit(measures[0].unit)].label.toLowerCase(),
+              expected: DM.controlMeasureKinds(ctl).map(function (x) { return (DM.MEASURE_KINDS[x] || { label: x }).label.toLowerCase(); }).join(' / ') };
+            measures.forEach(function (m) {
+              calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: m.label || DM.MEASURE_KINDS[DM.kindFromUnit(m.unit)].label,
+                value: m.value, unit: m.unit, comment: 'Donnée hors contrôle : ' + text.slice(0, 120), source: 'technicien' } });
+            });
+          }
         }
       }
-      if (measures.length && !attachedMeasure && !isFeederTest) {
+      if (notes.unitMismatch) {
+        // rien d'autre : le contrôle en cours sera redemandé
+      } else if (measures.length && !attachedMeasure && !isFeederTest) {
         measures.forEach(function (m) {
           calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: (m.label ? m.label + ' — ' : '') + shortLabel(ctl.description),
             value: m.value, unit: m.unit, location: ctl.location, control_id: ctl.id, source: 'technicien' } });
         });
       }
-      if (!DM.hasResult(ctl) && !attachedControl) {
+      if (!DM.hasResult(ctl) && !attachedControl && !notes.unitMismatch) {
         const v = verdictFrom(text);
         const nt = DM.normText(text);
         // interprétation automatique, uniquement à partir de ce que le technicien a écrit
@@ -342,6 +372,8 @@
         }
         if (!auto && measures.length && DM.controlMeasureKinds(ctl).indexOf('isolement') !== -1) {
           const ins = DM.agent.analyzeInsulation(measures);
+          // une valeur qui fluctue signe un défaut franc intermittent, même si elle passe parfois au-dessus du seuil
+          if (ins && !ins.abnormal && DM.hasKeyword(nt, 'instable')) { ins.abnormal = true; ins.summary += ' Valeur instable : défaut intermittent.'; }
           if (ins) auto = { verdict: ins.abnormal ? 'non_conforme' : 'conforme', summary: ins.summary, insulation: ins };
         }
         if (!auto && measures.length >= 2) {
@@ -358,9 +390,13 @@
           calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: obtained, verdict: auto.verdict, conclusion: auto.summary } });
           notes.result = { controlId: ctl.id, verdict: auto.verdict, obtained: obtained, series: auto.series, feeders: auto.feeders,
             insulation: auto.insulation, summary: auto.summary, unit: measures.length ? measures[0].unit : '' };
-        } else if (v && !measures.length) {
+        } else if (v) {
           calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: text, verdict: v } });
           notes.result = { controlId: ctl.id, verdict: v, obtained: text };
+          // zone désignée par le technicien (« Tronçon 2.31 à 2.39 : défaut ») : mémorisée pour la suite et le diagnostic
+          // (un repère chiffré est exigé, et « défaut terre / de communication » n'est pas une zone)
+          const zone = v === 'non_conforme' && text.match(/([^·;:\n]{3,50}?)\s*:\s*(?:en\s+)?d[ée]faut\b(?!\s*(?:terre|de\s+comm))/i);
+          if (zone && /\d/.test(zone[1])) calls.push({ name: 'record_fact', input: { question: 'Zone en défaut', answer: zone[1].trim(), source: 'mesure' } });
         } else if (!/^\s*(je ne sais pas|sais pas)/i.test(text)) notes.awaitVerdict = ctl.id;
       }
     } else if (ask && ask.kind === 'confirm' && ask.hypothesisId && DM.findHyp(d, ask.hypothesisId)) {
@@ -372,6 +408,8 @@
         const tags = [];
         const feeder = DM.findFact(d, 'Départ en défaut');
         if (feeder) tags.push(feeder.answer.split(/\s/)[0]);
+        const zone = DM.findFact(d, 'Zone en défaut');
+        if (zone) tags.push(zone.answer);
         h.evidence.slice(-2).forEach(function (e) {
           (e.text.match(/\b(?:KM|KA|K|Q|QF|F|X|BJ|BD|CJ)\d{1,3}\b/g) || []).forEach(function (t) { if (tags.indexOf(t) === -1) tags.push(t); });
         });
@@ -634,7 +672,13 @@
       const h = DM.findHyp(d, notes.confirmed);
       const tplC = findTemplate(this, h);
       parts.push('✅ **Diagnostic confirmé : ' + (d.verdict.summary || h.cause) + '.**' +
-        (tplC && tplC.advice ? '\n**Réparation conseillée :** ' + tplC.advice : '') + '\nTu peux procéder à la réparation. Décris-moi ensuite ce qui a été fait (pièces remplacées, réglages) ; le rapport est prêt à être généré.');
+        (tplC && tplC.advice ? '\n**Réparation conseillée :** ' + tplC.advice : '') +
+        // pistes restées sans contrôle : signalées, car elles peuvent être des problèmes distincts (ex. fausse alarme d'un détecteur)
+        (function () {
+          const open = d.hypotheses.filter(function (x) { return x.id !== h.id && x.status === 'possible' && !DM.controlsOf(d, x.id).some(DM.hasResult); });
+          return open.length ? '\n**Non vérifié, à traiter séparément si le symptôme existe :** ' + open.map(function (x) { return x.cause; }).join(' ; ') + '.' : '';
+        })() +
+        '\nTu peux procéder à la réparation. Décris-moi ensuite ce qui a été fait (pièces remplacées, réglages) ; le rapport est prêt à être généré.');
       return this.finish(parts, null);
     }
     if (notes.result && notes.result.summary && notes.result.summary !== 'Anomalie constatée.') {
@@ -670,6 +714,13 @@
     else if (notes.result && notes.result.verdict === 'conforme' && !notes.localized) parts.push('Résultat conforme, noté.');
     if (notes.notConfirmed) parts.push('D’accord, je ne confirme pas encore : poursuivons les contrôles.');
 
+    if (notes.unitMismatch) {
+      const u = notes.unitMismatch;
+      parts.push('Cette valeur (' + u.unit + ' : ' + u.kind + ') ne correspond pas au contrôle demandé' + (u.expected ? ' (' + u.expected + ')' : '') +
+        '. Je la note à part, sans la rattacher à ce contrôle.');
+      return this.finish(parts, { question: 'Donne-moi le résultat du contrôle « ' + shortLabel(u.ctl.description) + ' ».', choices: ['Je ne peux pas le faire'],
+        kind: 'result', control_id: u.ctl.id });
+    }
     if (notes.awaitVerdict) {
       const ctl = DM.findControl(d, notes.awaitVerdict);
       const ms = DM.measurementsOf(d, ctl.id);
