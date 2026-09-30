@@ -112,4 +112,51 @@
     }
     return { level: level, title: title, points: points, confirmations: confirmations, requireAck: !!level };
   };
+
+  /* ---------- Niveaux de risque (V2) ---------- */
+  DM.RISK_LEVELS = {
+    1: { label: 'Niveau 1 — Information / observation', short: 'N1', cls: 'r1' },
+    2: { label: 'Niveau 2 — Contrôle hors tension', short: 'N2', cls: 'r2' },
+    3: { label: 'Niveau 3 — Mesure sous tension', short: 'N3', cls: 'r3' },
+    4: { label: 'Niveau 4 — Intervention potentiellement dangereuse', short: 'N4', cls: 'r4' }
+  };
+
+  /** Règles électriques rappelées avant toute opération de niveau ≥ 2 sur un domaine électrique. */
+  DM.ELECTRICAL_RULES = [
+    'Privilégier la consignation : un contrôle qui peut se faire hors tension se fait hors tension.',
+    'Ne jamais toucher un conducteur sous tension.',
+    'Ne jamais remplacer une protection par un calibre supérieur sans justification technique.',
+    'Ne jamais shunter ni contourner une sécurité.'
+  ];
+
+  /**
+   * Niveau de risque d'un contrôle : calculé d'après sa nature, les mots-clés et le domaine.
+   * `control.risk` (proposé par l'agent ou le technicien) peut relever le niveau, jamais l'abaisser.
+   * @returns {{level: number, label: string, cls: string, safety: object, precautions: string[]}}
+   */
+  DM.riskLevel = function (control, installationType) {
+    const c = control || {};
+    const s = DM.getSafety(c, installationType);
+    let level = 1;
+    if (c.type === 'hors_tension') level = 2;
+    if (c.type === 'sous_tension' || c.type === 'fluide') level = 3;
+    if (c.type === 'fonctionnel' && (installationType === 'incendie' || installationType === 'industriel')) level = 3;
+    if (s.level === 'warning' && level < 2) level = 2;
+    if (s.level === 'danger' && c.type !== 'sous_tension') level = 4;
+    if (s.level === 'danger' && c.type === 'sous_tension') {
+      const text = DM.normText((c.description || '') + ' ' + (c.expected || ''));
+      if (['400', 'tgbt', 'jeu de barres', 'hta', 'extinction', 'co2'].some(function (k) { return DM.hasKeyword(text, k); })) level = 4;
+    }
+    const asked = parseInt(c.risk, 10);
+    if (asked >= 1 && asked <= 4 && asked > level) level = asked;
+    const precautions = s.points.slice();
+    if (level >= 2 && ELECTRIC_DOMAINS.indexOf(installationType) !== -1) {
+      DM.ELECTRICAL_RULES.forEach(function (r) { if (precautions.indexOf(r) === -1) precautions.push(r); });
+    }
+    const R = DM.RISK_LEVELS[level];
+    let label = R.label;
+    if (level === 3 && c.type !== 'sous_tension') label = 'Niveau 3 — Mesure / essai sur installation en fonctionnement';
+    if (level === 2 && c.type !== 'hors_tension') label = 'Niveau 2 — Contrôle avec précautions';
+    return { level: level, label: label, short: R.short, cls: R.cls, safety: s, precautions: precautions };
+  };
 })(window.DM);

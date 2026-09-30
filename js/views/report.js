@@ -1,4 +1,4 @@
-/* DIAG-MAINT — compte-rendu imprimable / partageable */
+/* DIAG-MAINT — compte-rendu imprimable / exportable en PDF / partageable */
 (function (DM) {
   'use strict';
   const esc = DM.esc, nl2br = DM.nl2br, icon = DM.icon, ui = DM.ui;
@@ -25,57 +25,85 @@
       if (!d) return ui.notFound();
       const r = DM.buildReport(d, DM.store.settings());
       const idq = encodeURIComponent(d.id);
+      let n = 0;
+      const sec = function (title, content) { return block(++n, title, content); };
 
       const controls = r.controls.length ? '<div class="rp-controls">' + r.controls.map(function (c, i) {
         return '<div class="rp-control"><div class="rp-control__head"><b>' + (i + 1) + '.</b> ' + esc(c.description) + '</div>' +
           '<table class="rp-table"><tbody>' +
           '<tr><th>Hypothèse</th><td>' + esc(c.hypothesis) + '</td></tr>' +
-          '<tr><th>Nature</th><td>' + esc(c.type) + '</td></tr>' +
+          '<tr><th>Nature</th><td>' + esc(c.type) + ' · risque N' + c.risk + '</td></tr>' +
           (c.expected ? '<tr><th>Attendu</th><td>' + esc(c.expected) + '</td></tr>' : '') +
           '<tr><th>Obtenu</th><td>' + nl2br(c.obtained) + (c.measure ? ' <b class="measure">(' + esc(c.measure) + ')</b>' : '') + '</td></tr>' +
           '<tr><th>Verdict</th><td>' + ui.chip(c.verdict, c.verdictCls) + (c.conclusion ? ' ' + esc(c.conclusion) : '') + '</td></tr>' +
+          (c.safetyDeclared ? '<tr><th>Sécurité</th><td class="small">Consignes non validées formellement dans l’application (résultat rapporté dans la conversation).</td></tr>' : '') +
           '</tbody></table></div>';
       }).join('') + '</div>' : '<p class="muted">Aucun contrôle réalisé.</p>';
 
-      const measures = r.measures.length ? '<table class="rp-table rp-table--grid"><thead><tr><th>Point de mesure</th><th>Valeur</th><th>Attendu</th></tr></thead><tbody>' +
-        r.measures.map(function (m) { return '<tr><td>' + esc(m.label) + '</td><td class="measure">' + esc(m.value) + '</td><td>' + esc(m.expected || '—') + '</td></tr>'; }).join('') +
-        '</tbody></table>' : '<p class="muted">Aucune mesure relevée.</p>';
+      const measures = r.measures.length ? '<table class="rp-table rp-table--grid"><thead><tr><th>Date / heure</th><th>Mesure</th><th>Valeur</th><th>Emplacement</th><th>Résultat</th></tr></thead><tbody>' +
+        r.measures.map(function (m) {
+          return '<tr><td class="nowrap">' + esc(DM.fmtDateTime(m.at)) + '</td><td>' + esc(m.label) + (m.control ? '<br><small class="muted">' + esc(m.control) + '</small>' : '') + '</td>' +
+            '<td class="measure">' + esc(m.value) + '</td><td>' + esc(m.location || '—') + '</td><td>' + (m.result ? ui.chip(m.result, m.resultCls) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>' : '<p class="muted">Aucune mesure relevée.</p>';
 
       const hyps = r.hypotheses.length ? '<ul class="rp-hyps">' + r.hypotheses.map(function (h) {
-        return '<li>' + ui.chip(h.state, h.stateCls) + ' <b>' + esc(h.cause) + '</b>' + (h.conclusion ? ' — ' + esc(h.conclusion) : '') + '</li>';
+        return '<li>' + ui.chip(h.state, h.stateCls) + ' <b>' + esc(h.cause) + '</b>' + (h.conclusion ? ' — ' + esc(h.conclusion) : '') +
+          (h.evidence.length ? '<ul class="ev ev--pro">' + h.evidence.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>' : '') +
+          (h.counterEvidence.length ? '<ul class="ev ev--con">' + h.counterEvidence.map(function (e) { return '<li>' + esc(e) + '</li>'; }).join('') + '</ul>' : '') + '</li>';
       }).join('') + '</ul>' : '';
 
-      const diagnosis = (r.isConfirmed ? '' : '<div class="notice notice--warning">' + icon('alert') + '<div>Aucune hypothèse confirmée par un contrôle : diagnostic non établi.</div></div>') +
+      const diagnosis = '<div class="verdict verdict--' + r.verdict.cls + '"><div><strong>' + esc(r.verdict.label) + '</strong>' +
+          (r.verdict.missing.length ? '<p class="small">Éléments manquants : ' + r.verdict.missing.map(esc).join(' ; ') + '</p>' : '') + '</div></div>' +
+        (r.isConfirmed ? '' : '<div class="notice notice--warning">' + icon('alert') + '<div>Aucune hypothèse confirmée par un contrôle : diagnostic non établi.</div></div>') +
         (r.confirmed.length ? '<p><span class="muted">Cause(s) confirmée(s) :</span> <b>' + r.confirmed.map(esc).join(' ; ') + '</b></p>' : '') +
         text(r.diagnosis) + (hyps ? '<h4>Hypothèses étudiées</h4>' + hyps : '');
 
+      const parts = r.parts.length ? '<table class="rp-table rp-table--grid"><thead><tr><th>Qté</th><th>Désignation</th><th>Référence</th></tr></thead><tbody>' +
+        r.parts.map(function (p) { return '<tr><td>' + esc(p.quantity) + '</td><td>' + esc(p.designation) + '</td><td>' + esc(p.reference || '—') + '</td></tr>'; }).join('') +
+        '</tbody></table>' : '<p class="muted">—</p>';
+
+      const photos = r.photos.length ? '<div class="photo-grid rp-photos">' + r.photos.map(function (p) {
+        return '<figure><button type="button" class="photo-thumb" data-action="photo-open" data-photo="' + esc(p.id) + '"><img data-photo-id="' + esc(p.id) + '" alt="' + esc(p.kind) + '"></button>' +
+          '<figcaption class="small">' + esc(p.kind) + (p.caption ? ' — ' + esc(p.caption) : '') + '</figcaption></figure>';
+      }).join('') + '</div>' : '<p class="muted">Aucune photo.</p>';
+
       return {
-        title: 'Compte-rendu',
+        title: 'Rapport',
         back: '#/diag/' + idq,
         html:
           '<div class="report-tools no-print">' +
-            '<button type="button" class="btn btn--primary" data-action="print">' + icon('print') + 'Imprimer / PDF</button>' +
+            '<button type="button" class="btn btn--primary" data-action="print">' + icon('print') + 'Exporter en PDF</button>' +
             '<button type="button" class="btn btn--ghost" data-action="share">' + icon('share') + 'Partager</button>' +
             '<button type="button" class="btn btn--ghost" data-action="copy">' + icon('copy') + 'Copier</button>' +
             '<button type="button" class="btn btn--ghost" data-action="txt">' + icon('download') + '.txt</button>' +
           '</div>' +
-          (r.technician ? '' : '<p class="small muted no-print">Astuce : renseignez votre nom dans <a href="#/parametres">Réglages</a> pour qu’il apparaisse sur le compte-rendu.</p>') +
+          '<p class="small muted no-print">« Exporter en PDF » ouvre l’impression : choisis « Enregistrer au format PDF ».' +
+            (r.technician ? '' : ' Renseigne ton nom dans <a href="#/parametres">Réglages</a> pour qu’il apparaisse.') + '</p>' +
           '<article class="report" id="report">' +
-            '<header class="rp-head"><div class="rp-brand">' + icon('bolt') + '<div><strong>DIAG-MAINT</strong><span>Compte-rendu de diagnostic</span></div></div>' +
-              '<div class="rp-meta"><div><span>N°</span><b>' + esc(r.number) + '</b></div><div><span>Date</span><b>' + esc(DM.fmtDate(r.date)) + '</b></div>' +
-              '<div><span>Statut</span><b>' + esc(r.status) + '</b></div>' +
-              (r.technician ? '<div><span>Technicien</span><b>' + esc(r.technician) + '</b></div>' : '') +
-              (r.company ? '<div><span>Entreprise</span><b>' + esc(r.company) + '</b></div>' : '') + '</div></header>' +
+            '<header class="rp-head"><div class="rp-brand">' + icon('bolt') + '<div><strong>DIAG-MAINT</strong><span>Rapport d’intervention</span></div></div>' +
+              '<div class="rp-meta">' +
+                '<div><span>N°</span><b>' + esc(r.number) + '</b></div>' +
+                '<div><span>Date</span><b>' + esc(DM.fmtDate(r.date)) + '</b></div>' +
+                (r.client ? '<div><span>Client</span><b>' + esc(r.client) + '</b></div>' : '') +
+                (r.site ? '<div><span>Site</span><b>' + esc(r.site) + '</b></div>' : '') +
+                (r.technician ? '<div><span>Technicien</span><b>' + esc(r.technician) + '</b></div>' : '') +
+                (r.company ? '<div><span>Entreprise</span><b>' + esc(r.company) + '</b></div>' : '') +
+                '<div><span>Statut</span><b>' + esc(r.status) + '</b></div>' +
+              '</div></header>' +
             '<h2 class="rp-title">' + esc(r.title) + '</h2>' +
-            block(1, 'Matériel', '<table class="rp-table"><tbody>' + r.equipment.map(function (e) { return '<tr><th>' + esc(e[0]) + '</th><td>' + esc(e[1]) + '</td></tr>'; }).join('') + '</tbody></table>') +
-            block(2, 'Panne constatée', text(r.description)) +
-            block(3, 'Symptômes', r.symptoms.length ? '<ul>' + r.symptoms.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>' : '<p class="muted">—</p>') +
-            block(4, 'Contrôles réalisés', controls + (r.pendingControls ? '<p class="small muted">' + DM.plural(r.pendingControls, 'contrôle prévu non réalisé', 'contrôles prévus non réalisés') + '.</p>' : '')) +
-            block(5, 'Mesures', measures) +
-            block(6, 'Diagnostic', diagnosis) +
-            block(7, 'Réparation effectuée', text(r.repair)) +
-            block(8, 'Recommandations', text(r.recommendations)) +
-            (r.photoCount ? block(9, 'Photos', ui.photoGallery(d.photos, { readonly: true }).replace(/data-action="photo-view"/g, 'data-action="photo-open"')) : '') +
+            sec('Équipement', '<table class="rp-table"><tbody>' + r.equipment.map(function (e) { return '<tr><th>' + esc(e[0]) + '</th><td>' + esc(e[1]) + '</td></tr>'; }).join('') + '</tbody></table>') +
+            sec('Panne', text(r.description)) +
+            sec('Symptômes', (r.symptoms.length ? '<ul>' + r.symptoms.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>' : '<p class="muted">—</p>') +
+              (r.facts.length ? '<h4>Informations recueillies</h4><ul class="rp-facts">' + r.facts.map(function (f) { return '<li><span class="muted">' + esc(f.question) + '</span> → ' + esc(f.answer) + '</li>'; }).join('') + '</ul>' : '')) +
+            sec('Photos', photos) +
+            sec('Contrôles', controls + (r.pendingControls ? '<p class="small muted">' + DM.plural(r.pendingControls, 'contrôle prévu non réalisé', 'contrôles prévus non réalisés') + '.</p>' : '')) +
+            sec('Mesures', measures) +
+            sec('Diagnostic', diagnosis) +
+            sec('Réparation', text(r.repair)) +
+            sec('Pièces utilisées', parts) +
+            sec('Recommandations', text(r.recommendations)) +
+            sec('Résultat final', r.finalResult ? '<p><b>' + esc(r.finalResult) + '</b></p>' : '<p class="muted">—</p>') +
+            (r.documents.length ? sec('Documentation consultée', '<ul>' + r.documents.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>') : '') +
             '<footer class="rp-foot"><div class="rp-sign"><span>Visa technicien</span></div><div class="rp-sign"><span>Visa client / exploitant</span></div></footer>' +
             '<p class="small muted center">Généré le ' + esc(DM.fmtDateTime(r.generatedAt)) + ' avec DIAG-MAINT</p>' +
           '</article>'
@@ -86,13 +114,13 @@
       'print': function () { window.print(); },
       'copy': function (el, e, p) {
         const t = DM.reportToText(DM.buildReport(DM.store.get(p.id), DM.store.settings()));
-        return copyText(t).then(function () { ui.toast('Compte-rendu copié', 'success'); });
+        return copyText(t).then(function () { ui.toast('Rapport copié', 'success'); });
       },
       'share': function (el, e, p) {
         const d = DM.store.get(p.id);
         const t = DM.reportToText(DM.buildReport(d, DM.store.settings()));
         if (navigator.share) {
-          return navigator.share({ title: 'Compte-rendu ' + d.name, text: t }).catch(function (err) {
+          return navigator.share({ title: 'Rapport ' + d.name, text: t }).catch(function (err) {
             if (err && err.name !== 'AbortError') throw err;
           });
         }
@@ -100,8 +128,7 @@
       },
       'txt': function (el, e, p) {
         const d = DM.store.get(p.id);
-        const t = DM.reportToText(DM.buildReport(d, DM.store.settings()));
-        DM.download('compte-rendu-' + DM.reportNumber(d) + '.txt', t, 'text/plain;charset=utf-8');
+        DM.download('rapport-' + DM.reportNumber(d) + '.txt', DM.reportToText(DM.buildReport(d, DM.store.settings())), 'text/plain;charset=utf-8');
       },
       'photo-open': function (el, e, p) {
         const d = DM.store.get(p.id);

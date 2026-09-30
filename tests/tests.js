@@ -81,14 +81,22 @@
     DM.concludeHypothesis(d, h.id, 'ecartee', 'Pas de variateur sur cette machine');
     eq(DM.findHyp(d, h.id).status, 'ecartee');
   });
-  test('États : à vérifier → en contrôle → confirmée', function () {
+  // V2 : statuts explicites possible → suspectée → confirmée / écartée (ils ne changent jamais tout seuls)
+  test('États V2 : possible → suspectée → confirmée', function () {
     const d = base();
     const h = DM.addHypothesis(d, { cause: 'X' });
-    eq(DM.hypothesisState(d, h), 'a_verifier');
+    eq(DM.hypothesisState(d, h), 'possible');
     const c = DM.addControl(d, { hypothesisId: h.id, type: 'fonctionnel', description: 'Essai' });
-    eq(DM.hypothesisState(d, h), 'a_verifier');
+    eq(DM.hypothesisState(d, h), 'possible');
     DM.recordResult(d, c.id, { obtained: 'KO', verdict: 'non_conforme' });
-    eq(DM.hypothesisState(d, h), 'en_cours');
+    eq(DM.hypothesisState(d, h), 'possible', 'un résultat ne change pas le statut à la place du technicien / de l’agent');
+    DM.concludeHypothesis(d, h.id, 'suspectee', 'KO à l’essai');
+    eq(DM.hypothesisState(d, h), 'suspectee');
+    DM.concludeHypothesis(d, h.id, 'confirmee', '');
+    eq(DM.hypothesisState(d, h), 'confirmee');
+    // anciens statuts V1 toujours acceptés et convertis
+    DM.concludeHypothesis(d, h.id, 'a_verifier', '');
+    eq(h.status, 'possible');
   });
   test('Suppression d’hypothèse en cascade (contrôles + sous-hypothèses)', function () {
     const d = base();
@@ -113,7 +121,7 @@
     eq(d.status, 'cloture');
     DM.removeControl(d, c.id);
     eq(d.hypotheses.length, 1, 'B supprimée');
-    eq(DM.findHyp(d, h.id).status, 'a_verifier', 'plus confirmée sans résultat');
+    eq(DM.findHyp(d, h.id).status, 'possible', 'plus confirmée sans résultat');
     eq(d.status, 'en_cours', 'diagnostic rouvert');
   });
   test('Contrôle général (sans hypothèse)', function () {

@@ -79,6 +79,10 @@
         [C('hors_tension', 'Contrôler le serrage des borniers et la continuité des conducteurs de commande en les sollicitant.', 'Serrage correct, continuité stable.')])
     ],
     hvac: [
+      H('Surintensité : consommation excessive de l’unité extérieure', 'Un déclenchement de la protection magnétothermique seule (sans le différentiel) après quelques minutes de fonctionnement oriente vers une intensité absorbée trop élevée (compresseur en difficulté, haute pression, ventilateur).',
+        ['disjonct', 'declench', 'saute', 'surintensit', 'minutes', 'apres quelques', 'c16', 'c20', 'c25', 'c32', 'protection'],
+        [C('sous_tension', 'Mesurer l’intensité absorbée par l’unité extérieure pendant son fonctionnement (pince ampèremétrique sur la phase d’alimentation).', 'Inférieure ou égale à l’intensité maximale indiquée sur la plaque signalétique / la notice.'),
+         C('visuel', 'Unité consignée : contrôler la propreté du condenseur et la rotation libre du ventilateur extérieur.', 'Batterie propre, ventilateur libre.')]),
       H('Manque de fluide frigorigène (fuite)', 'Une charge insuffisante réduit la puissance frigorifique et provoque givrage / basse pression.',
         ['ne refroidit', 'froid insuffisant', 'pas de froid', 'givre', 'glace', 'fuite', 'bulle', 'basse pression', 'bp', 'ne chauffe'],
         [C('fluide', 'Relever les pressions HP/BP au manifold, calculer surchauffe et sous-refroidissement.', 'Valeurs conformes au constructeur (surchauffe typique 5 à 8 K).'),
@@ -254,7 +258,9 @@
    * @returns {{template: object, score: number, matched: string[]}[]} trié par pertinence
    */
   DM.suggestHypotheses = function (diag) {
-    const text = DM.normText([diag.name, diag.description, diag.symptoms].join(' '));
+    // les réponses mémorisées comptent comme indices (pas les questions : « le différentiel déclenche-t-il ? » ≠ oui)
+    const answers = (diag.facts || []).map(function (f) { return f.answer; }).join(' ');
+    const text = DM.normText([diag.name, diag.description, diag.symptoms, answers].join(' '));
     const existing = (diag.hypotheses || []).map(function (h) { return DM.normalize(h.cause); });
     const pool = (KB[diag.installationType] || []).concat(KB.generic);
     return pool

@@ -1,0 +1,6 @@
+# Secrets et données du serveur : jamais versionnés
+server/.env
+server/data/
+server/node_modules/
+server/tests/.tmp*/
+*.log

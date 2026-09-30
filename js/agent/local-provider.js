@@ -1,0 +1,462 @@
+/* DIAG-MAINT — LocalProvider : moteur de diagnostic à règles, sans IA ni réseau.
+ *
+ * Utilisé hors connexion, sans serveur, ou sans clé d'API. Il pilote les MÊMES outils que l'IA
+ * (mêmes garde-fous) en émettant des blocs tool_use au format Messages API :
+ *   compréhension du message → évaluation des résultats → questions essentielles (une à la fois)
+ *   → hypothèses (base de pannes) → plan de contrôle → réponse.
+ * Il ne fait ni analyse d'image, ni lecture de document, ni recherche Web.
+ */
+(function (DM) {
+  'use strict';
+
+  DM.agent = DM.agent || {};
+  const LOCAL_TOOLS = ['ask_user', 'record_fact', 'update_equipment', 'set_fault', 'upsert_hypothesis', 'propose_control',
+    'save_measurement', 'record_control_result', 'set_diagnosis_status', 'suggest_report', 'search_previous_diagnostics'];
+
+  function s(v) { return v == null ? '' : String(v).trim(); }
+  function has(n, words) { return words.some(function (w) { return DM.hasKeyword(n, w); }); }
+
+  const BRANDS = ['Mitsubishi Electric', 'Mitsubishi', 'Daikin', 'Toshiba', 'Panasonic', 'Fujitsu', 'Hitachi', 'Samsung', 'LG', 'Atlantic', 'Carrier',
+    'Trane', 'York', 'Lennox', 'Ciat', 'Airwell', 'Schneider', 'Legrand', 'Hager', 'ABB', 'Siemens', 'Grundfos', 'Wilo', 'KSB', 'Danfoss',
+    'SEW', 'Leroy-Somer', 'WEG', 'Omron', 'Allen-Bradley', 'Somfy', 'Came', 'BFT', 'Urmet', 'Aiphone', 'Esser', 'Finsecur', 'Nugelec',
+    'Bosch', 'Atlas Copco', 'Festo', 'SMC', 'Viessmann', 'De Dietrich', 'Saunier Duval', 'Frisquet'];
+
+  const TYPE_RULES = [
+    ['hvac', ['clim', 'climatis', 'split', 'pac ', 'pompe a chaleur', 'groupe froid', 'cta', 'vmc', 'rooftop', 'unite exterieure', 'unite interieure', 'chaudiere']],
+    ['incendie', ['ssi', 'incendie', 'desenfum', 'detecteur de fumee', 'ecs ', 'alarme incendie', 'declencheur manuel']],
+    ['acces', ['badge', 'gache', 'ventouse', 'controle d acces', 'interphone', 'lecteur de badge', 'visiophone']],
+    ['pompe', ['pompe', 'surpresseur', 'relevage', 'circulateur']],
+    ['automatisme', ['automate', 'api ', 'plc', 'ihm', 'hmi', 'profinet', 'modbus']],
+    ['moteur', ['moteur', 'variateur']],
+    ['industriel', ['machine', 'convoyeur', 'presse', 'robot', 'verin', 'hydraulique', 'pneumatique']],
+    ['electrotechnique', ['contacteur', 'armoire', 'relais', 'telerupteur', 'coffret']],
+    ['electricite', ['disjonct', 'differentiel', 'tableau', 'prise', 'eclairage', 'circuit', 'tgbt', 'fusible']]
+  ];
+
+  const UNIT_RE = /(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
+  const UNIT_NORM = { uf: 'µF', ohm: 'Ω', ohms: 'Ω', kohm: 'kΩ', kohms: 'kΩ', mohm: 'MΩ', mohms: 'MΩ', vac: 'V AC', vdc: 'V DC', 'v ac': 'V AC', 'v dc': 'V DC',
+    degre: '°C', degres: '°C', 'degré': '°C', 'degrés': '°C' };
+
+  /** Mesures citées dans un texte : [{value, unit}] (valeurs exactement telles qu'écrites). */
+  DM.agent.parseMeasurements = function (text) {
+    const out = [];
+    let m;
+    UNIT_RE.lastIndex = 0;
+    while ((m = UNIT_RE.exec(String(text || '')))) {
+      let unit = m[2];
+      const key = unit.toLowerCase();
+      unit = UNIT_NORM[key] || unit.replace(/\s+/, ' ');
+      out.push({ value: m[1], unit: unit });
+    }
+    return out;
+  };
+
+  /** Libellé court d'une mesure d'après la description du contrôle (« Mesurer l'intensité absorbée par … (pince) » → « Intensité absorbée par … »). */
+  function shortLabel(desc) {
+    let t = s(desc).replace(/^(unité consignée\s*:\s*)?/i, '')
+      .replace(/^(mesurer|relever|contrôler|vérifier|tester|observer)\s+/i, '')
+      .replace(/^(la |le |les |l['’]|un |une |des )/i, '');
+    t = t.split(/\s\(|,|;|\. /)[0];
+    if (t.length > 60) t = t.slice(0, 60).replace(/\s+\S*$/, '') + '…';
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function noDot(t) { return s(t).replace(/[.\s]+$/, ''); }
+
+  function detectType(n) {
+    for (let i = 0; i < TYPE_RULES.length; i++) if (has(n, TYPE_RULES[i][1])) return TYPE_RULES[i][0];
+    return null;
+  }
+  function detectBrand(text) {
+    const n = DM.normText(text);
+    for (let i = 0; i < BRANDS.length; i++) if (DM.hasKeyword(n, DM.normText(BRANDS[i]).trim())) return BRANDS[i];
+    return null;
+  }
+  function detectReference(text) {
+    const m = String(text || '').match(/(?:r[ée]f(?:[ée]rence)?|mod[eè]le|type)\s*(?:exacte\s*)?[:=]?\s*([A-Za-z0-9][A-Za-z0-9\-\/\.]{3,})/i);
+    return m && /\d/.test(m[1]) && /[A-Za-z]/.test(m[1]) ? m[1].replace(/[.]$/, '').toUpperCase() : null;
+  }
+  function protectionMention(text) {
+    const m = String(text || '').match(/\b([BCD])\s?(\d{1,3})\b/);
+    return m && parseInt(m[2], 10) <= 125 ? m[1] + m[2] : null;
+  }
+  function normalizeAnswer(text) {
+    const n = DM.normText(text);
+    if (has(n, ['je ne sais pas', 'sais pas', 'nsp', 'aucune idee', 'je ne la trouve pas', 'introuvable'])) return 'Inconnu (le technicien ne sait pas)';
+    if (/^\s*(oui|yes|ouais|affirmatif)\b/i.test(text)) return 'Oui' + (s(text).length > 4 ? ' — ' + s(text) : '');
+    if (/^\s*(non|no|nan|negatif|négatif)\b/i.test(text)) return 'Non' + (s(text).length > 4 ? ' — ' + s(text) : '');
+    return s(text);
+  }
+  function yesNo(text) {
+    if (/^\s*(oui|yes|ouais|confirm)/i.test(text)) return true;
+    if (/^\s*(non|no|nan)\b/i.test(text)) return false;
+    return null;
+  }
+  function verdictFrom(text) {
+    const n = DM.normText(text);
+    if (has(n, ['non conforme', 'pas conforme', 'hors tolerance', 'anormal', 'mauvais', 'hs '])) return 'non_conforme';
+    if (has(n, ['conforme', 'normal', 'bon ', 'ok '])) return 'conforme';
+    if (has(n, ['je ne sais pas', 'sais pas', 'indetermine'])) return 'indetermine';
+    return null;
+  }
+
+  /** Questions essentielles, posées une par une, uniquement si la réponse n'est pas déjà connue. */
+  const QUESTIONS = [
+    { id: 'delai', question: 'Au bout de combien de temps de fonctionnement la protection déclenche-t-elle ?',
+      choices: ['Immédiatement', 'Après quelques minutes', 'De façon aléatoire'],
+      when: function (n) { return has(n, ['disjonct', 'declench', 'saute', 'coupe', 's arrete']); } },
+    { id: 'differentiel', question: 'Le différentiel en amont déclenche-t-il également ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
+      when: function (n) { return has(n, ['disjonct', 'declench', 'saute']) && !has(n, ['differentiel']); } },
+    { id: 'code', question: 'Un code défaut est-il affiché (télécommande, carte électronique, écran) ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
+      when: function (n, d) { return ['hvac', 'automatisme', 'moteur', 'incendie', 'acces'].indexOf(d.installationType) !== -1 && !DM.extractErrorCodes(n).length; } },
+    { id: 'reference', question: 'Quelle est la référence exacte du matériel ? Tu peux aussi envoyer une photo de sa plaque signalétique.',
+      choices: ['Je ne la trouve pas'],
+      when: function (n, d) { return !d.reference && !d.model; } }
+  ];
+
+  function LocalProvider() {
+    this.name = 'local';
+    this.stage = 0;
+    this.notes = {};
+    this.pending = null;
+    this.counter = 0;
+  }
+  LocalProvider.prototype.supportsTool = function (name) { return LOCAL_TOOLS.indexOf(name) !== -1; };
+
+  LocalProvider.prototype.toolUse = function (calls) {
+    const self = this;
+    return {
+      content: calls.map(function (c) { return { type: 'tool_use', id: 'local_' + (++self.counter), name: c.name, input: c.input }; }),
+      stop_reason: 'tool_use', usage: {}, model: 'local'
+    };
+  };
+
+  LocalProvider.prototype.complete = async function (req) {
+    const d = req.context.diag;
+    if (this.pending) {
+      const t = this.pending; this.pending = null;
+      return { content: [{ type: 'text', text: t }], stop_reason: 'end_turn', usage: {}, model: 'local' };
+    }
+    this.readToolResults(req.messages);
+    const stages = [this.understand, this.evaluate, this.essentials, this.hypotheses, this.controls, this.compose];
+    while (this.stage < stages.length) {
+      const out = stages[this.stage++].call(this, d, req);
+      if (out && out.calls && out.calls.length) {
+        if (out.text != null) this.pending = out.text;
+        return this.toolUse(out.calls);
+      }
+      if (out && out.text != null) return { content: [{ type: 'text', text: out.text }], stop_reason: 'end_turn', usage: {}, model: 'local' };
+    }
+    return { content: [{ type: 'text', text: 'D’accord.' }], stop_reason: 'end_turn', usage: {}, model: 'local' };
+  };
+
+  /** Récupère les résultats d'outils utiles (recherche dans l'historique). */
+  LocalProvider.prototype.readToolResults = function (messages) {
+    const last = messages[messages.length - 1];
+    if (!last || !Array.isArray(last.content)) return;
+    const kbId = this.notes.kbCallId;
+    last.content.forEach(function (b) {
+      if (b.type === 'tool_result' && b.tool_use_id === kbId && typeof b.content === 'string' && b.content.indexOf('Aucun') !== 0) this.notes.kbText = b.content;
+    }, this);
+  };
+
+  function context(d) {
+    const msgs = d.messages;
+    const current = msgs[msgs.length - 1];
+    let prevAsk = null, prevUser = null;
+    for (let i = msgs.length - 2; i >= 0; i--) {
+      if (msgs[i].role === 'assistant') { prevAsk = msgs[i].ask || null; break; }
+    }
+    for (let i = msgs.length - 2; i >= 0; i--) { if (msgs[i].role === 'user') { prevUser = msgs[i]; break; } }
+    return { text: current.text || '', attachments: current.attachments || [], prevAsk: prevAsk, prevUser: prevUser };
+  }
+
+  /* 1. Compréhension du message du technicien */
+  LocalProvider.prototype.understand = function (d) {
+    const c = context(d);
+    const text = c.text, n = DM.normText(text);
+    const calls = [];
+    const notes = this.notes;
+    const ask = c.prevAsk;
+    const measures = DM.agent.parseMeasurements(text);
+    const attachedMeasure = c.attachments.some(function (a) { return a.type === 'measurement'; });
+    if (c.attachments.some(function (a) { return a.type === 'photo'; })) notes.photo = true;
+    const attachedControl = c.attachments.some(function (a) { return a.type === 'control'; });
+
+    if (ask && ask.kind === 'verdict' && ask.controlId && DM.findControl(d, ask.controlId) && !DM.hasResult(DM.findControl(d, ask.controlId))) {
+      const verdict = verdictFrom(text) || 'indetermine';
+      const ctl = DM.findControl(d, ask.controlId);
+      const ms = DM.measurementsOf(d, ctl.id);
+      const obtained = ms.length ? ms.map(function (m) { return m.value + (m.unit ? ' ' + m.unit : ''); }).join(', ') : (c.prevUser ? c.prevUser.text : text);
+      calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: obtained, verdict: verdict } });
+      notes.result = { controlId: ctl.id, verdict: verdict, obtained: obtained };
+    } else if (ask && ask.kind === 'result' && ask.controlId && DM.findControl(d, ask.controlId)) {
+      let ctl = DM.findControl(d, ask.controlId);
+      if (measures.length) {
+        // la valeur donnée ne correspond pas à la grandeur attendue : on cherche le contrôle qu'elle concerne
+        const k = DM.kindFromUnit(measures[0].unit);
+        const kinds = DM.controlMeasureKinds(ctl);
+        if (kinds.length && kinds.indexOf(k) === -1) {
+          const alt = DM.pendingControls(d).find(function (c) { return DM.controlMeasureKinds(c).indexOf(k) !== -1; });
+          if (alt) { ctl = alt; notes.relinked = alt.id; }
+        }
+      }
+      if (measures.length && !attachedMeasure) {
+        measures.forEach(function (m) {
+          calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: shortLabel(ctl.description), value: m.value, unit: m.unit,
+            location: ctl.location, control_id: ctl.id, source: 'technicien' } });
+        });
+      }
+      if (!DM.hasResult(ctl) && !attachedControl) {
+        const v = verdictFrom(text);
+        if (v && !measures.length) {
+          calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: text, verdict: v } });
+          notes.result = { controlId: ctl.id, verdict: v, obtained: text };
+        } else if (!/^\s*(je ne sais pas|sais pas)/i.test(text)) notes.awaitVerdict = ctl.id;
+      }
+    } else if (ask && ask.kind === 'confirm' && ask.hypothesisId && DM.findHyp(d, ask.hypothesisId)) {
+      const yes = yesNo(text);
+      const h = DM.findHyp(d, ask.hypothesisId);
+      if (yes === true) {
+        calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'confirmee', justification: 'Confirmée par le technicien après un contrôle non conforme.' } });
+        calls.push({ name: 'set_diagnosis_status', input: { status: 'confirme', summary: h.cause, missing: [] } });
+        calls.push({ name: 'suggest_report', input: {} });
+        notes.confirmed = h.id;
+      } else if (yes === false) {
+        notes.notConfirmed = h.id;
+      }
+    } else if (ask && (ask.kind === 'fact' || ask.kind === 'open') && ask.question) {
+      calls.push({ name: 'record_fact', input: { question: ask.question, answer: normalizeAnswer(text), source: 'technicien' } });
+      if (ask.factId === 'code' && yesNo(text) === true && !DM.extractErrorCodes(text).length) notes.askCodeValue = true;
+    }
+
+    // matériel cité dans le message
+    const eq = {};
+    const brand = detectBrand(text);
+    if (brand && DM.normalize(brand) !== DM.normalize(d.brand)) eq.brand = brand;
+    const type = detectType(n);
+    if (type && d.installationType === 'autre') eq.installation_type = type;
+    const ref = detectReference(text) || (ask && ask.factId === 'reference' && /[0-9]/.test(text) && /[A-Za-z]/.test(text) && s(text).split(/\s+/).length <= 3 ? s(text).toUpperCase() : null);
+    if (ref && ref !== d.reference) eq.reference = ref;
+    if (Object.keys(eq).length) calls.push({ name: 'update_equipment', input: Object.assign(eq, { source: 'technicien' }) });
+
+    if (!d.description && text && !attachedMeasure) {
+      calls.push({ name: 'set_fault', input: { description: text, symptoms_add: [text.length > 90 ? text.slice(0, 87) + '…' : text] } });
+      if (!d.name || /^Diagnostic du /.test(d.name)) {
+        const title = [brand || d.brand, text.length > 50 ? text.slice(0, 47) + '…' : text].filter(Boolean).join(' — ');
+        calls.push({ name: 'update_equipment', input: { name: title } });
+      }
+    }
+    const prot = protectionMention(text);
+    if (prot && !DM.findFact(d, 'Protection qui déclenche')) calls.push({ name: 'record_fact', input: { question: 'Protection qui déclenche', answer: prot, source: 'technicien' } });
+    const codes = DM.extractErrorCodes(text);
+    if (codes.length) {
+      calls.push({ name: 'record_fact', input: { question: 'Code défaut affiché', answer: codes.join(', '), source: 'technicien' } });
+      calls.push({ name: 'set_fault', input: { symptoms_add: codes.map(function (x) { return 'Code défaut ' + x; }) } });
+    }
+
+    // mesures citées hors d'un contrôle attendu : rattachées au prochain contrôle
+    if (!(ask && ask.kind === 'result') && measures.length && !attachedMeasure) {
+      const next = DM.nextControl(d);
+      measures.forEach(function (m) {
+        calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: next ? shortLabel(next.description) : DM.MEASURE_KINDS[DM.kindFromUnit(m.unit)].label,
+          value: m.value, unit: m.unit, control_id: next ? next.id : undefined, source: 'technicien' } });
+      });
+      if (next && !DM.hasResult(next)) notes.awaitVerdict = next.id;
+    }
+    if (attachedMeasure) {
+      const mid = c.attachments.find(function (a) { return a.type === 'measurement'; }).id;
+      const mm = DM.findMeasurement(d, mid);
+      if (mm && mm.controlId && !DM.hasResult(DM.findControl(d, mm.controlId))) {
+        if (mm.result) {
+          calls.push({ name: 'record_control_result', input: { control_id: mm.controlId, obtained: mm.value + (mm.unit ? ' ' + mm.unit : ''), verdict: mm.result } });
+          notes.result = { controlId: mm.controlId, verdict: mm.result, obtained: mm.value + ' ' + mm.unit };
+        } else notes.awaitVerdict = mm.controlId;
+      }
+    }
+    if (attachedControl) {
+      const cid = c.attachments.find(function (a) { return a.type === 'control'; }).id;
+      const ctl = DM.findControl(d, cid);
+      if (ctl && DM.hasResult(ctl)) notes.result = { controlId: ctl.id, verdict: ctl.verdict, obtained: ctl.obtained };
+    }
+    // première description : consulter l'historique (une fois)
+    if (!d.description && text && !this.notes.kbCallId && d.messages.length <= 2) {
+      this.notes.kbCallId = 'pending';
+    }
+    return { calls: calls };
+  };
+
+  /* 2. Évaluation d'un résultat de contrôle */
+  LocalProvider.prototype.evaluate = function (d) {
+    const r = this.notes.result;
+    const calls = [];
+    if (this.notes.kbCallId === 'pending') {
+      calls.push({ name: 'search_previous_diagnostics', input: { mode: 'similaire', text: d.description + ' ' + d.symptoms } });
+      this.notes.kbCallId = 'local_' + (this.counter + 1);
+    }
+    if (!r) return { calls: calls };
+    const ctl = DM.findControl(d, r.controlId);
+    const h = ctl && ctl.hypothesisId ? DM.findHyp(d, ctl.hypothesisId) : null;
+    if (!h) return { calls: calls };
+    const fact = 'Contrôle « ' + ctl.description + ' » : ' + r.obtained;
+    if (r.verdict === 'non_conforme') {
+      calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'suspectee', evidence_add: [fact + ' (non conforme)'] } });
+      calls.push({ name: 'set_diagnosis_status', input: { status: 'probable', summary: h.cause, missing: ['Confirmation de la cause « ' + h.cause + ' »'] } });
+      this.notes.toConfirm = h.id;
+    } else if (r.verdict === 'conforme') {
+      const others = DM.controlsOf(d, h.id).filter(function (x) { return x.id !== ctl.id && !DM.hasResult(x); });
+      const input = { id: h.id, counter_evidence_add: [fact + ' (conforme)'] };
+      if (!others.length) { input.status = 'ecartee'; input.justification = 'Contrôle conforme : ' + r.obtained; this.notes.discarded = h.cause; }
+      calls.push({ name: 'upsert_hypothesis', input: input });
+    }
+    return { calls: calls };
+  };
+
+  /* 3. Questions essentielles (une seule par tour) */
+  LocalProvider.prototype.essentials = function (d) {
+    if (this.notes.result || this.notes.awaitVerdict || this.notes.confirmed || this.notes.toConfirm) return null;
+    if (d.controls.some(DM.hasResult)) return null; // la recherche est engagée : on ne revient pas aux questions d'ouverture
+    if (this.notes.askCodeValue) { this.notes.question = { question: 'Quel code défaut exactement ?', choices: [], kind: 'fact', factId: 'code_valeur' }; return null; }
+    const n = DM.normText([d.description, d.symptoms].join(' '));
+    for (let i = 0; i < QUESTIONS.length; i++) {
+      const q = QUESTIONS[i];
+      if (DM.findFact(d, q.question)) continue;
+      if (q.id === 'differentiel' && d.facts.some(function (f) { return /differentiel/.test(DM.normalize(f.question)); })) continue;
+      if (q.when(n, d)) { this.notes.question = { question: q.question, choices: q.choices, kind: 'fact', factId: q.id }; return null; }
+    }
+    return null;
+  };
+
+  /* 4. Hypothèses depuis la base de pannes */
+  LocalProvider.prototype.hypotheses = function (d) {
+    if (this.notes.question || !d.description) return null;
+    const alive = d.hypotheses.filter(function (h) { return h.status !== 'ecartee'; });
+    if (alive.length) return null;
+    const sug = DM.suggestHypotheses(d);
+    const relevant = sug.filter(function (x) { return x.score > 0; });
+    // 2 à 3 pistes : les pertinentes d'abord, complétées par les plus courantes pour ce type d'installation
+    const pick = relevant.slice(0, 3);
+    sug.forEach(function (x) { if (pick.length < 2 && pick.indexOf(x) === -1) pick.push(x); });
+    if (!pick.length) return null;
+    const self = this;
+    self.notes.templates = {};
+    const calls = pick.map(function (x) {
+      self.notes.templates[DM.normalize(x.template.cause)] = x.template;
+      return { name: 'upsert_hypothesis', input: {
+        cause: x.template.cause,
+        reason: x.template.reason + (x.matched.length ? ' Indices : ' + x.matched.join(', ') + '.' : ''),
+        status: 'possible'
+      } };
+    });
+    this.notes.newHypotheses = true;
+    return { calls: calls };
+  };
+
+  /* 5. Plan de contrôle : premier contrôle type de chaque hypothèse vivante qui n'en a pas */
+  LocalProvider.prototype.controls = function (d) {
+    if (this.notes.question) return null;
+    const self = this;
+    const calls = [];
+    d.hypotheses.forEach(function (h) {
+      if (h.status === 'ecartee' || DM.controlsOf(d, h.id).some(function (c) { return !DM.hasResult(c); })) return;
+      const tpl = (self.notes.templates || {})[DM.normalize(h.cause)] ||
+        Object.keys(DM.KB).reduce(function (found, k) { return found || DM.KB[k].find(function (t) { return DM.normalize(t.cause) === DM.normalize(h.cause); }); }, null);
+      if (!tpl) return;
+      const done = DM.controlsOf(d, h.id).map(function (c) { return DM.normalize(c.description); });
+      const next = tpl.controls.find(function (c) { return done.indexOf(DM.normalize(c.description)) === -1; });
+      if (!next) return;
+      calls.push({ name: 'propose_control', input: {
+        hypothesis_id: h.id, description: next.description, type: next.type, expected: next.expected,
+        why: 'Vérifier l’hypothèse « ' + h.cause + ' ».'
+      } });
+    });
+    return { calls: calls };
+  };
+
+  /* 6. Réponse (et question unique) */
+  LocalProvider.prototype.compose = function (d) {
+    const notes = this.notes;
+    const parts = [];
+    const calls = [];
+    let ask = null;
+    if (notes.kbText) parts.push('📚 Diagnostic(s) similaire(s) dans l’historique :\n' + notes.kbText);
+    if (notes.photo) {
+      parts.push('📷 Photo enregistrée. Je ne peux pas l’analyser en mode local (l’analyse d’image nécessite l’IA en ligne) : ' +
+        'si elle montre une référence ou un code défaut, écris-le moi.');
+    }
+
+    if (notes.confirmed) {
+      const h = DM.findHyp(d, notes.confirmed);
+      parts.push('✅ **Diagnostic confirmé : ' + h.cause + '.**\nTu peux procéder à la réparation. Décris-moi ensuite ce qui a été fait (pièces remplacées, réglages) ; le rapport est prêt à être généré.');
+      return this.finish(parts, null);
+    }
+    if (notes.toConfirm) {
+      const h = DM.findHyp(d, notes.toConfirm);
+      parts.push('Résultat **non conforme** : l’hypothèse « ' + h.cause + ' » devient **suspectée** (diagnostic probable).');
+      ask = { question: 'Ce résultat suffit-il à expliquer la panne ? Si oui, je la confirme.', choices: ['Oui, confirmer', 'Non, continuer'], kind: 'confirm' };
+      ask.hypothesisId = h.id;
+      return this.finish(parts, ask);
+    }
+    if (notes.discarded) parts.push('Résultat conforme : je **écarte** la piste « ' + notes.discarded + ' ».');
+    else if (notes.result && notes.result.verdict === 'conforme') parts.push('Résultat conforme, noté.');
+    if (notes.notConfirmed) parts.push('D’accord, je ne confirme pas encore : poursuivons les contrôles.');
+
+    if (notes.awaitVerdict) {
+      const ctl = DM.findControl(d, notes.awaitVerdict);
+      const ms = DM.measurementsOf(d, ctl.id);
+      if (notes.relinked === ctl.id) parts.push('Cette valeur ne correspond pas au contrôle demandé : je la rattache au contrôle « ' + ctl.description + ' ».');
+      parts.push('📏 Noté : ' + (ms.length ? ms.map(DM.formatMeasurement).join(' ; ') : 'résultat reçu') + '.' +
+        (ctl.expected ? '\nRésultat attendu : ' + noDot(ctl.expected) + '.' : ''));
+      return this.finish(parts, { question: 'Par rapport à l’attendu, ce résultat est-il conforme ?', choices: ['Conforme', 'Non conforme', 'Je ne sais pas'], kind: 'verdict', control_id: ctl.id });
+    }
+    if (notes.question) {
+      if (!d.messages.some(function (m) { return m.role === 'assistant'; })) parts.push('D’accord, je note la panne.');
+      return this.finish(parts, notes.question);
+    }
+    if (notes.newHypotheses) {
+      const alive = d.hypotheses.filter(function (h) { return h.status !== 'ecartee'; });
+      parts.push('Pistes à vérifier : ' + alive.map(function (h) { return h.cause; }).join(' ; ') + '. Commençons par le contrôle le plus simple.');
+    }
+    const next = DM.nextControl(d);
+    if (next) {
+      const r = DM.riskLevel(next, d.installationType);
+      const n = d.controls.filter(DM.hasResult).length + 1;
+      const h = next.hypothesisId ? DM.findHyp(d, next.hypothesisId) : null;
+      let t = '**Contrôle n°' + n + ' :** ' + next.description;
+      if (next.why || h) t += '\n*Pourquoi :* ' + (next.why || 'vérifier « ' + h.cause + ' »');
+      if (next.expected) t += '\n*Résultat attendu :* ' + noDot(next.expected) + '.';
+      if (r.level >= 2) t += '\n⚠️ **RISQUE — ' + r.label + '.** ' + r.precautions.slice(0, 2).join(' ');
+      parts.push(t);
+      return this.finish(parts, { question: 'Donne-moi la valeur mesurée ou le résultat constaté.', choices: [], kind: 'result', control_id: next.id });
+    }
+    if (d.hypotheses.length && !DM.canClose(d)) {
+      const missing = ['Un contrôle permettant de départager les pistes restantes', 'Une nouvelle observation ou mesure du technicien'];
+      calls.push({ name: 'set_diagnosis_status', input: { status: 'non_confirme', summary: 'Pistes de la base locale épuisées', missing: missing } });
+      parts.push('Je ne peux pas conclure avec les contrôles réalisés : les pistes de ma base locale sont écartées. Il me manque une observation supplémentaire (bruit, odeur, code défaut, conditions d’apparition). Décris-moi ce que tu constates, ou reconnecte-toi pour que l’IA approfondisse.');
+      return { calls: calls, text: parts.join('\n\n') };
+    }
+    if (!d.description) return this.finish(['Décris-moi la panne. Tu peux également ajouter une photo.'], null);
+    if (d.installationType === 'autre') {
+      return this.finish(parts, { question: 'De quel type d’installation s’agit-il ?', choices: ['Climatisation', 'Électricité', 'Moteur', 'Pompe'], kind: 'fact' });
+    }
+    return this.finish(parts.concat(['Décris-moi ce que tu constates pour poursuivre.']), null);
+  };
+
+  LocalProvider.prototype.finish = function (parts, ask) {
+    let text = parts.filter(Boolean).join('\n\n');
+    if (ask) {
+      text += (text ? '\n\n' : '') + ask.question;
+      const input = { question: ask.question, choices: ask.choices || [], kind: ask.kind || 'open' };
+      if (ask.control_id) input.control_id = ask.control_id;
+      this.extraAsk = { factId: ask.factId || null, hypothesisId: ask.hypothesisId || null };
+      return { calls: [{ name: 'ask_user', input: input }], text: text };
+    }
+    return { text: text };
+  };
+
+  DM.agent.LocalProvider = LocalProvider;
+
+  /** Tour d'agent avec le moteur local (nouvelle instance à chaque tour : le moteur est à état). */
+  DM.agent.runLocalTurn = function (p) {
+    return DM.agent.runTurn(Object.assign({}, p, { provider: new LocalProvider() }));
+  };
+})(window.DM);

@@ -2,16 +2,19 @@
 (function (DM) {
   'use strict';
   const esc = DM.esc, icon = DM.icon;
-  DM.VERSION = '1.0.0';
+  DM.VERSION = '2.0.0';
   DM.views = DM.views || {};
 
   const ROUTES = [
     [/^\/?$/, 'home'],
     [/^\/nouveau$/, 'form'],
-    [/^\/diag\/([^/]+)$/, 'diag'],
+    [/^\/diag\/([^/]+)$/, 'agent'],
+    [/^\/diag\/([^/]+)\/arbre$/, 'diag'],
     [/^\/diag\/([^/]+)\/modifier$/, 'form'],
     [/^\/diag\/([^/]+)\/rapport$/, 'report'],
     [/^\/historique$/, 'history'],
+    [/^\/connaissances$/, 'knowledge'],
+    [/^\/documents$/, 'documents'],
     [/^\/parametres$/, 'settings']
   ];
 
@@ -31,13 +34,21 @@
 
   /* ---------- opérations partagées ---------- */
   DM.ops = {
+    /** Nouveau diagnostic piloté par l'agent : ouvre directement la conversation. */
+    newAgentDiag: function () {
+      const d = DM.createDraft({});
+      DM.addMessage(d, { role: 'assistant', text: 'Décris-moi la panne. Tu peux également ajouter une photo.' });
+      DM.store.save(d);
+      DM.app.go('/diag/' + encodeURIComponent(d.id));
+      return d;
+    },
     duplicate: function (id) {
       const d = DM.store.get(id);
       if (!d) return Promise.reject(new Error('Diagnostic introuvable.'));
-      const copy = DM.duplicateDiagnostic(d);
+      const newId = DM.uid('diag');
       const ids = (d.photos || []).map(function (p) { return p.id; });
-      return DM.photos.copy(ids, copy.id).catch(function () { return {}; }).then(function (map) {
-        copy.photos = (d.photos || []).map(function (p) { return Object.assign({}, p, { id: map[p.id] }); }).filter(function (p) { return p.id; });
+      return DM.photos.copy(ids, newId).catch(function () { return {}; }).then(function (map) {
+        const copy = DM.duplicateDiagnostic(d, { id: newId, photoMap: map });
         DM.store.save(copy);
         return copy;
       });
@@ -73,6 +84,8 @@
       '<span class="diag-item__body"><strong>' + esc(d.name) + '</strong>' +
       '<span class="muted small">' + esc(T.label) + (equip ? ' — ' + esc(equip) : '') + '</span>' +
       '<span class="diag-item__meta">' + DM.ui.chip(S.label, S.cls) +
+      (d.verdict && d.verdict.status !== 'non_confirme' && d.status !== 'cloture'
+        ? DM.ui.chip(DM.VERDICT_STATUS[d.verdict.status].label.replace('Diagnostic ', ''), DM.VERDICT_STATUS[d.verdict.status].cls) : '') +
       '<span class="small muted">' + icon('calendar') + esc(DM.fmtDate(d.date)) + '</span>' +
       '<span class="small muted">' + icon('branch') + st.hypotheses + '</span>' +
       '<span class="small muted">' + icon('meter') + st.done + '/' + st.controls + '</span>' +
@@ -122,13 +135,17 @@
   function renderNav(name, params) {
     const items = [
       ['home', '#/', 'home', 'Accueil'],
-      ['form', '#/nouveau', 'plus', 'Nouveau'],
+      ['new', '#/', 'plus', 'Nouveau', 'new-diag'],
       ['history', '#/historique', 'history', 'Historique'],
+      ['knowledge', '#/connaissances', 'book', 'Savoir'],
       ['settings', '#/parametres', 'settings', 'Réglages']
     ];
-    const active = name === 'diag' || name === 'report' || (name === 'form' && params.id) ? 'history' : name;
+    let active = name;
+    if (name === 'agent' || name === 'diag' || name === 'report' || (name === 'form' && params.id)) active = 'history';
+    if (name === 'documents') active = 'knowledge';
+    if (name === 'form' && !params.id) active = 'new';
     document.getElementById('bottomnav').innerHTML = items.map(function (it) {
-      return '<a href="' + it[1] + '" class="bottomnav__item' + (it[0] === active ? ' is-active' : '') + '"' +
+      return '<a href="' + it[1] + '"' + (it[4] ? ' data-action="' + it[4] + '"' : '') + ' class="bottomnav__item' + (it[0] === active ? ' is-active' : '') + '"' +
         (it[0] === active ? ' aria-current="page"' : '') + '>' + icon(it[2]) + '<span>' + it[3] + '</span></a>';
     }).join('');
   }
@@ -163,6 +180,7 @@
   };
 
   const globalActions = {
+    'new-diag': function () { DM.ops.newAgentDiag(); },
     'theme-toggle': function () {
       const cur = DM.store.settings().theme;
       const next = THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length];
@@ -195,5 +213,7 @@
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
       navigator.serviceWorker.register('sw.js').catch(function (e) { console.warn('Service worker non enregistré', e); });
     }
+    // état du serveur IA + envoi des diagnostics en attente de synchronisation
+    if (DM.agentClient) DM.agentClient.health().then(function () { if (DM.sync) DM.sync.flush(); });
   });
 })(window.DM);

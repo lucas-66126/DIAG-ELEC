@@ -1,62 +1,88 @@
-# DIAG-MAINT — V1
+# DIAG-MAINT V2 — agent IA de diagnostic technique
 
-Assistant de diagnostic de pannes pour techniciens de maintenance (électricité, électrotechnique,
-HVAC, automatisme, moteurs, pompes, contrôle d'accès, incendie, maintenance industrielle).
+DIAG-MAINT accompagne un technicien de maintenance pendant toute la recherche de panne, sur son téléphone :
+**observer → mesurer → analyser → tester → confirmer → réparer → rapport**.
 
-Application web **mobile-first**, 100 % locale : aucune installation, aucun serveur distant,
-aucune dépendance. Les données restent dans le navigateur de l'appareil.
+Domaines : électricité, électrotechnique, climatisation / HVAC, automatisme, moteurs, pompes,
+contrôle d'accès, sécurité incendie, maintenance industrielle.
+
+- **Conversation** avec l'agent : une question courte à la fois, réponses rapides, photo, document, mesure,
+  « ✓ contrôle effectué », dictée vocale.
+- **Panneau « État du diagnostic »** : matériel, panne, verdict (non confirmé / probable / confirmé et ce qui manque),
+  hypothèses avec preuves et contre-preuves, contrôles (✓ faits, ▶ prochain, ○ prévus), mesures horodatées,
+  faits connus (mémoire).
+- **Sécurité** : niveaux de risque 1 à 4, bannière **RISQUE** et validation des consignes avant les opérations dangereuses.
+- **Transparence** : « Recherche Web effectuée » (avec sources), « Documentation consultée », « Photo analysée »,
+  « Mesure enregistrée ».
+- **Base documentaire** (fabricant › catégorie › série › modèle › référence) et **base de connaissances**
+  (panne similaire, même référence, même code défaut, même symptôme).
+- **Rapport** : client/site, équipement, panne, symptômes, photos, contrôles, mesures, diagnostic, réparation,
+  pièces, recommandations, résultat final — export PDF.
+- **Hors connexion** : tout est enregistré sur le téléphone ; sans réseau, un moteur local (sans IA) prend le relais ;
+  les diagnostics terminés sont synchronisés au retour de la connexion.
+
+Architecture : voir [ARCHITECTURE.md](ARCHITECTURE.md). Avancement : [PROGRESS.md](PROGRESS.md).
 
 ## Lancer
 
-**Windows (recommandé)** : double-cliquer sur `LANCER-DIAG-MAINT.bat`.
-Le navigateur s'ouvre sur http://localhost:8080. Fermer la fenêtre noire pour arrêter.
+**Windows** : double-cliquer sur `LANCER-DIAG-MAINT.bat` (installe les dépendances la première fois, démarre le
+serveur et ouvre http://localhost:8787).
 
-Autres possibilités :
-- en ligne de commande : `powershell -ExecutionPolicy Bypass -File serve.ps1 [-Port 8090]`
-- ouvrir directement `index.html` (fonctionne, mais sans mode hors-ligne ni installation PWA) ;
-- **sur smartphone** : héberger le dossier sur un hébergement statique HTTPS
-  (GitHub Pages, Netlify Drop, serveur interne…), ouvrir l'URL puis « Ajouter à l'écran d'accueil ».
-  L'application fonctionne ensuite hors-ligne.
+Ou en ligne de commande :
 
-## Tests
+```bash
+cd server
+npm install
+npm start
+```
 
-Ouvrir http://localhost:8080/tests/ (serveur lancé) : 35 tests unitaires sur la logique métier,
-la sécurité, les suggestions, le compte-rendu et le stockage.
+Prérequis : Node.js 20 ou plus récent (`winget install OpenJS.NodeJS.LTS`).
+
+## Configurer la clé d'API (IA)
+
+1. Créer une clé sur https://console.anthropic.com (section *API Keys*).
+2. Copier `server/.env.example` en `server/.env` et renseigner `ANTHROPIC_API_KEY=…`.
+3. Redémarrer le serveur : la console affiche « Fournisseur IA : anthropic (claude-opus-5-5…) + recherche Web ».
+
+La clé reste sur le serveur : elle n'est jamais envoyée au navigateur ni versionnée (`.gitignore`).
+Options utiles dans `.env` : `ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT` (low → max), `WEB_SEARCH=false`,
+`AI_PROVIDER=local` (forcer le moteur local).
+
+Sans clé, l'application fonctionne avec le **moteur local** : il guide le diagnostic avec la base de pannes intégrée,
+mais n'analyse ni photos ni documents et ne cherche pas sur le Web.
+
+## Utiliser depuis un téléphone
+
+- **Même réseau Wi-Fi** : dans `server/.env`, mettre `HOST=0.0.0.0` et un `APP_ACCESS_TOKEN` (obligatoire),
+  puis ouvrir `http://<adresse-du-PC>:8787` sur le téléphone et saisir le jeton dans *Réglages → Serveur IA*.
+  (Sans HTTPS, l'installation sur l'écran d'accueil et la dictée peuvent être limitées.)
+- **En déplacement** : héberger le dossier `server/` chez un hébergeur Node.js (HTTPS), avec les mêmes variables
+  d'environnement. Le site GitHub Pages peut aussi servir d'interface : renseigner l'adresse du serveur dans
+  *Réglages → Serveur IA* et l'ajouter à `ALLOWED_ORIGINS`.
+
+## Tester
+
+```bash
+cd server
+npm test
+```
+
+40 tests Node (modèle, agent, fournisseur Anthropic simulé, API HTTP) dont le **scénario Mitsubishi** complet
+avec une IA simulée et avec le moteur local. Tests navigateur de la logique métier : ouvrir
+http://localhost:8787/tests/ (35 tests).
 
 ## Structure
 
 ```
-index.html              coque de l'application
-css/styles.css          styles (thèmes clair/sombre, impression)
-js/utils.js             utilitaires (échappement, dates, normalisation)
-js/icons.js             icônes techniques SVG
-js/safety.js            types de contrôle + règles de sécurité (consignation, sous tension…)
-js/knowledge.js         base de pannes : hypothèses et contrôles types par domaine
-js/model.js             modèle métier : arbre symptôme → hypothèse → contrôle → résultat
-js/report.js            construction du compte-rendu
-js/store.js             persistance localStorage (diagnostics, réglages)
-js/photos.js            photos compressées dans IndexedDB
-js/ui.js                modales, notifications, galerie photo
-js/app.js               routeur, navigation, opérations partagées
-js/views/*.js           écrans : accueil, formulaire, diagnostic, compte-rendu, historique, réglages
-sw.js, manifest.webmanifest, icons/   PWA (hors-ligne, installation)
-serve.ps1, LANCER-DIAG-MAINT.bat      serveur local Windows
-tests/                  tests unitaires (navigateur)
+index.html, css/, icons/, manifest.webmanifest, sw.js   interface (PWA)
+js/model.js, safety.js, knowledge.js, kb.js, report.js   cœur métier partagé (navigateur + serveur)
+js/agent/tools.js, engine.js, local-provider.js          cœur de l'agent partagé
+js/agent/client.js, js/sync.js                           client de l'agent, file de synchronisation
+js/views/                                                écrans (agent = conversation, diag = arbre, rapport…)
+server/src/                                              serveur : HTTP, prompt système, fournisseurs d'IA, services
+server/tests/                                            tests Node
+tests/                                                   tests navigateur
 ```
 
-## Règles métier clés
-
-- Une hypothèse ne peut être **confirmée** que si au moins un de ses contrôles a un **résultat saisi**.
-- Écarter une hypothèse sans résultat exige une justification écrite.
-- Le diagnostic ne peut être **clôturé** qu'avec une hypothèse confirmée et un diagnostic final rédigé.
-- Les contrôles à risque (sous tension, hors tension, fluides, essais incendie/machine, mots-clés
-  comme « condensateur », « variateur », « 400 V »…) exigent de valider les consignes de sécurité
-  **avant** la saisie du résultat.
-
-## Sauvegarde
-
-Les données sont liées au navigateur et à l'appareil. Utiliser **Réglages → Exporter une sauvegarde**
-régulièrement (fichier JSON, photos incluses) ; **Importer** pour restaurer ou transférer.
-
-> Les suggestions de l'assistant sont indicatives. Le technicien reste responsable de ses conclusions
-> et du respect des règles de sécurité (NF C 18-510, consignes du site).
+> Les suggestions de l'agent sont une aide : le technicien reste responsable de ses conclusions et du respect des
+> règles de sécurité (NF C 18-510, consignes du site).

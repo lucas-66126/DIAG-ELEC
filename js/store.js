@@ -1,30 +1,35 @@
-/* DIAG-MAINT — persistance des diagnostics et réglages (localStorage). */
+/* DIAG-MAINT — persistance locale (localStorage) : diagnostics, équipements, bibliothèque, réglages. */
 (function (DM) {
   'use strict';
 
-  const KEY = 'diagmaint.diagnostics.v1';
-  const SKEY = 'diagmaint.settings.v1';
+  const KEYS = {
+    diagnostics: 'diagmaint.diagnostics.v1',
+    equipments: 'diagmaint.equipments.v1',
+    library: 'diagmaint.library.v1',
+    settings: 'diagmaint.settings.v1'
+  };
   const DEFAULT_SETTINGS = { theme: 'auto', technician: '', company: '' };
 
-  /** Fabrique un store sur n'importe quel objet compatible Storage (injectable pour les tests). */
-  DM.createStore = function (storage) {
+  /** Collection d'objets {id, updatedAt} stockée sous une clé. `migrate` normalise chaque objet lu. */
+  function collection(storage, key, migrate) {
     let cache = null;
+    const fix = migrate || function (x) { return x; };
 
     function read() {
       if (cache) return cache;
       try {
-        const raw = storage.getItem(KEY);
+        const raw = storage.getItem(key);
         const list = raw ? JSON.parse(raw) : [];
-        cache = Array.isArray(list) ? list : [];
+        cache = Array.isArray(list) ? list.map(fix) : [];
       } catch (e) {
-        console.error('DIAG-MAINT : lecture du stockage impossible', e);
+        console.error('DIAG-MAINT : lecture du stockage impossible (' + key + ')', e);
         cache = [];
       }
       return cache;
     }
     function write(list) {
       try {
-        storage.setItem(KEY, JSON.stringify(list));
+        storage.setItem(key, JSON.stringify(list));
         cache = list;
       } catch (e) {
         cache = null; // relire l'état réellement persisté
@@ -38,35 +43,46 @@
         return DM.clone(read()).sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
       },
       get: function (id) {
-        const d = read().find(function (x) { return x.id === id; });
-        return d ? DM.clone(d) : null;
+        const x = read().find(function (o) { return o.id === id; });
+        return x ? DM.clone(x) : null;
       },
-      save: function (diag) {
+      save: function (obj) {
         const list = read().slice();
-        const i = list.findIndex(function (x) { return x.id === diag.id; });
-        const copy = DM.clone(diag);
+        const i = list.findIndex(function (o) { return o.id === obj.id; });
+        const copy = DM.clone(obj);
         if (i === -1) list.push(copy); else list[i] = copy;
         write(list);
         return copy;
       },
-      remove: function (id) {
-        write(read().filter(function (x) { return x.id !== id; }));
-      },
+      remove: function (id) { write(read().filter(function (o) { return o.id !== id; })); },
       replaceAll: function (list) { write(DM.clone(list)); },
       clear: function () { write([]); },
+      sizeBytes: function () {
+        try { return (storage.getItem(key) || '').length * 2; } catch (e) { return 0; }
+      }
+    };
+  }
+
+  /** Fabrique un store sur n'importe quel objet compatible Storage (injectable pour les tests). */
+  DM.createStore = function (storage) {
+    const diags = collection(storage, KEYS.diagnostics, function (d) { return DM.normalizeDiag ? DM.normalizeDiag(d) : d; });
+    const store = Object.assign({}, diags, {
+      equipments: collection(storage, KEYS.equipments),
+      library: collection(storage, KEYS.library),
       settings: function () {
-        try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(storage.getItem(SKEY) || '{}')); }
+        try { return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(storage.getItem(KEYS.settings) || '{}')); }
         catch (e) { return Object.assign({}, DEFAULT_SETTINGS); }
       },
       saveSettings: function (s) {
-        const merged = Object.assign(this.settings(), s);
-        try { storage.setItem(SKEY, JSON.stringify(merged)); } catch (e) { /* réglage non critique */ }
+        const merged = Object.assign(store.settings(), s);
+        try { storage.setItem(KEYS.settings, JSON.stringify(merged)); } catch (e) { /* réglage non critique */ }
         return merged;
       },
-      sizeBytes: function () {
-        try { return (storage.getItem(KEY) || '').length * 2; } catch (e) { return 0; }
+      totalBytes: function () {
+        return diags.sizeBytes() + store.equipments.sizeBytes() + store.library.sizeBytes();
       }
-    };
+    });
+    return store;
   };
 
   /** Stockage mémoire de secours (navigation privée stricte, stockage bloqué). */

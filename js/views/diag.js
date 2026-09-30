@@ -278,11 +278,12 @@
 
   function concludeForm(d, h, preset) {
     const hasRes = DM.hypothesisHasResult(d, h.id);
-    const cur = preset || (h.status === 'confirmee' || h.status === 'ecartee' ? h.status : '');
+    const cur = preset || h.status;
     const opts = [
       ['confirmee', 'Confirmée', 'ok', 'check', hasRes ? 'La cause est prouvée par le résultat d’un contrôle.' : 'Indisponible : aucun contrôle de cette hypothèse n’a de résultat.'],
+      ['suspectee', 'Suspectée', 'progress', 'branch', 'Au moins un élément concret appuie cette cause.'],
       ['ecartee', 'Écartée', 'ko', 'x', 'La cause est exclue' + (hasRes ? ' par le résultat des contrôles.' : ' — justification obligatoire sans résultat de contrôle.')],
-      ['a_verifier', 'Non conclue', 'todo', 'info', 'Laisser l’hypothèse ouverte.']
+      ['possible', 'Possible', 'todo', 'info', 'Laisser l’hypothèse ouverte, sans élément pour l’instant.']
     ];
     const results = DM.controlsOf(d, h.id).filter(DM.hasResult);
     return ui.modal({
@@ -409,8 +410,8 @@
       const S = DM.DIAG_STATUS[d.status];
       const idq = encodeURIComponent(d.id);
       return {
-        title: d.name,
-        back: '#/historique',
+        title: 'Arbre — ' + d.name,
+        back: '#/diag/' + idq,
         actions: '<a class="btn btn--icon btn--flat" href="#/diag/' + idq + '/rapport" aria-label="Compte-rendu" title="Compte-rendu">' + icon('file') + '</a>',
         fab: '<button type="button" class="fab" data-action="add-control" aria-label="Ajouter un contrôle">' + icon('plus') + '<span>Contrôle</span></button>',
         html:
@@ -551,6 +552,7 @@
         if (err) { ui.toast(err, 'error'); if (!data.finalDiagnosis) document.getElementById('f-final').focus(); return; }
         mutate(p.id, function (x) { DM.closeDiagnostic(x, data); });
         ui.toast('Diagnostic clôturé', 'success');
+        if (DM.sync) { DM.sync.enqueue(p.id); DM.sync.flush(); }
         window.scrollTo(0, 0);
       },
       'reopen': function (el, e, p) {

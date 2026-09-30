@@ -1,10 +1,13 @@
-/* DIAG-MAINT — service worker : réseau d'abord, cache en secours (fonctionnement hors-ligne). */
-const CACHE = 'diagmaint-v1.0.0';
+/* DIAG-MAINT — service worker : réseau d'abord, cache en secours (fonctionnement hors-ligne).
+ * Les appels d'API (/api/…) ne sont jamais mis en cache. */
+const CACHE = 'diagmaint-v2.0.0';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/styles.css',
-  './js/utils.js', './js/icons.js', './js/safety.js', './js/knowledge.js', './js/model.js', './js/report.js',
-  './js/store.js', './js/photos.js', './js/ui.js', './js/app.js',
-  './js/views/home.js', './js/views/form.js', './js/views/diag.js', './js/views/report.js', './js/views/history.js', './js/views/settings.js',
+  './js/utils.js', './js/icons.js', './js/safety.js', './js/knowledge.js', './js/model.js', './js/report.js', './js/kb.js',
+  './js/store.js', './js/photos.js', './js/sync.js', './js/ui.js', './js/app.js',
+  './js/agent/tools.js', './js/agent/engine.js', './js/agent/local-provider.js', './js/agent/client.js',
+  './js/views/home.js', './js/views/form.js', './js/views/agent.js', './js/views/diag.js', './js/views/report.js',
+  './js/views/history.js', './js/views/knowledge.js', './js/views/documents.js', './js/views/settings.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'
 ];
 
@@ -22,7 +25,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.includes('/api/')) return;
   e.respondWith(
     fetch(req)
       .then((res) => {
