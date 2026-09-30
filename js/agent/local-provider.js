@@ -37,24 +37,65 @@
   const UNIT_NORM = { uf: 'µF', ohm: 'Ω', ohms: 'Ω', kohm: 'kΩ', kohms: 'kΩ', mohm: 'MΩ', mohms: 'MΩ', vac: 'V AC', vdc: 'V DC', 'v ac': 'V AC', 'v dc': 'V DC',
     degre: '°C', degres: '°C', 'degré': '°C', 'degrés': '°C' };
 
-  /** Mesures citées dans un texte : [{value, unit}] (valeurs exactement telles qu'écrites). */
+  /** Mesures citées dans un texte : [{value, unit, label}] (valeurs exactement telles qu'écrites ;
+   *  label = repère qui précède la valeur : L1, L2-L3, U, pôle 2…). */
   DM.agent.parseMeasurements = function (text) {
     const out = [];
+    const src = String(text || '');
     let m;
     UNIT_RE.lastIndex = 0;
-    while ((m = UNIT_RE.exec(String(text || '')))) {
+    while ((m = UNIT_RE.exec(src))) {
       let unit = m[2];
       const key = unit.toLowerCase();
       unit = UNIT_NORM[key] || unit.replace(/\s+/, ' ');
-      out.push({ value: m[1], unit: unit });
+      const before = src.slice(Math.max(0, m.index - 14), m.index);
+      const lab = before.match(/(L[123](?:\s?-\s?L?[123])?|[UVW][12]?(?:\s?-\s?[UVW][12]?)?|phase\s?\d|p[ôo]le\s?\d)\s*[:=]?\s*$/i);
+      out.push({ value: m[1], unit: unit, label: lab ? lab[1].replace(/\s+/g, '') : '' });
     }
     return out;
+  };
+
+  /**
+   * Analyse d'une série de valeurs de même unité (courants par phase, chutes de tension par pôle, températures…).
+   * Calcul uniquement à partir des valeurs données : écart maximal à la moyenne et valeur hors série.
+   * @returns {null | {imbalancePct, outlier: {value, label}|null, abnormal: boolean, summary: string}}
+   */
+  DM.agent.analyzeSeries = function (measures) {
+    if (!measures || measures.length < 2) return null;
+    const unit = measures[0].unit;
+    if (!measures.every(function (x) { return x.unit === unit; })) return null;
+    const vals = measures.map(function (x) { return parseFloat(String(x.value).replace(',', '.')); });
+    if (vals.some(isNaN)) return null;
+    const mean = vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
+    if (mean <= 0) return null;
+    let iMax = 0;
+    vals.forEach(function (v, i) { if (Math.abs(v - mean) > Math.abs(vals[iMax] - mean)) iMax = i; });
+    const pct = Math.round(Math.abs(vals[iMax] - mean) / mean * 1000) / 10;
+    const others = vals.filter(function (v, i) { return i !== iMax; });
+    const otherMean = others.reduce(function (a, b) { return a + b; }, 0) / others.length;
+    // une valeur « hors série » : nettement différente des autres (écart > 10 % à la moyenne, ou > ×3 pour de petites valeurs)
+    const abnormal = pct > 10 || (otherMean > 0 && vals[iMax] / otherMean > 3);
+    const lab = measures[iMax].label;
+    const fmt = function (v) { return String(Math.round(v * 100) / 100).replace('.', ','); };
+    const ratio = otherMean > 0 ? vals[iMax] / otherMean : 0;
+    const who = (lab ? lab + ' à ' : '') + measures[iMax].value + ' ' + unit;
+    let summary;
+    if (!abnormal) summary = 'Valeurs homogènes (écart maximal ' + String(pct).replace('.', ',') + ' % à la moyenne).';
+    else if (ratio > 3) summary = who + ' se détache nettement : environ ' + Math.round(ratio) + ' fois la valeur des autres (' + fmt(otherMean) + ' ' + unit + ').';
+    else summary = 'Écart de ' + String(pct).replace('.', ',') + ' % par rapport à la moyenne (' + fmt(mean) + ' ' + unit + ') : ' + who + ' se détache des autres.';
+    return {
+      imbalancePct: pct,
+      outlier: abnormal ? { value: measures[iMax].value, label: lab } : null,
+      abnormal: abnormal,
+      summary: summary
+    };
   };
 
   /** Libellé court d'une mesure d'après la description du contrôle (« Mesurer l'intensité absorbée par … (pince) » → « Intensité absorbée par … »). */
   function shortLabel(desc) {
     let t = s(desc).replace(/^(unité consignée\s*:\s*)?/i, '')
       .replace(/^(mesurer|relever|contrôler|vérifier|tester|observer)\s+/i, '')
+      .replace(/^(en charge|en fonctionnement|à vide)\s+/i, '')
       .replace(/^(la |le |les |l['’]|un |une |des )/i, '');
     t = t.split(/\s\(|,|;|\. /)[0];
     if (t.length > 60) t = t.slice(0, 60).replace(/\s+\S*$/, '') + '…';
@@ -99,18 +140,30 @@
     return null;
   }
 
-  /** Questions essentielles, posées une par une, uniquement si la réponse n'est pas déjà connue. */
+  /** Durée déjà indiquée dans la description (« 30 à 50 minutes », « après 5 min », « jusqu'à 11h »…). */
+  const DURATION_RE = /(\d+\s*(?:(?:à|a|-)\s*\d+\s*)?(?:min(?:ute)?s?|h(?:eures?)?\b|s(?:econdes?)?\b))/i;
+  function thermalTrip(n) { return has(n, ['thermique', 'relais thermique', 'defaut thermique']); }
+  const MOTOR_TYPES = ['moteur', 'electrotechnique', 'industriel', 'pompe'];
+
+  /** Questions essentielles, posées une par une, uniquement si la réponse n'est ni connue ni déjà dans la description. */
   const QUESTIONS = [
     { id: 'delai', question: 'Au bout de combien de temps de fonctionnement la protection déclenche-t-elle ?',
       choices: ['Immédiatement', 'Après quelques minutes', 'De façon aléatoire'],
-      when: function (n) { return has(n, ['disjonct', 'declench', 'saute', 'coupe', 's arrete']); } },
+      when: function (n, d, raw) { return has(n, ['disjonct', 'declench', 'saute', 'coupe', 's arrete']) && !DURATION_RE.test(raw); } },
     { id: 'differentiel', question: 'Le différentiel en amont déclenche-t-il également ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
-      when: function (n) { return has(n, ['disjonct', 'declench', 'saute']) && !has(n, ['differentiel']); } },
+      // inutile quand le défaut est clairement thermique (relais thermique identifié)
+      when: function (n) { return has(n, ['disjonct', 'declench', 'saute']) && !has(n, ['differentiel']) && !thermalTrip(n); } },
     { id: 'code', question: 'Un code défaut est-il affiché (télécommande, carte électronique, écran) ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
-      when: function (n, d) { return ['hvac', 'automatisme', 'moteur', 'incendie', 'acces'].indexOf(d.installationType) !== -1 && !DM.extractErrorCodes(n).length; } },
+      when: function (n, d) {
+        return (['hvac', 'automatisme', 'incendie', 'acces'].indexOf(d.installationType) !== -1 || has(n, ['variateur', 'automate', 'ecran', 'carte'])) &&
+          !DM.extractErrorCodes(n).length;
+      } },
+    { id: 'plaque_moteur', question: 'Quelles sont les données de la plaque moteur (puissance, intensité nominale, couplage / démarrage) et le réglage du relais thermique ?',
+      choices: ['Je ne les ai pas'],
+      when: function (n, d) { return MOTOR_TYPES.indexOf(d.installationType) !== -1 && thermalTrip(n); } },
     { id: 'reference', question: 'Quelle est la référence exacte du matériel ? Tu peux aussi envoyer une photo de sa plaque signalétique.',
       choices: ['Je ne la trouve pas'],
-      when: function (n, d) { return !d.reference && !d.model; } }
+      when: function (n, d) { return !d.reference && !d.model && !(MOTOR_TYPES.indexOf(d.installationType) !== -1 && thermalTrip(n)); } }
   ];
 
   function LocalProvider() {
@@ -202,13 +255,23 @@
       }
       if (measures.length && !attachedMeasure) {
         measures.forEach(function (m) {
-          calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: shortLabel(ctl.description), value: m.value, unit: m.unit,
-            location: ctl.location, control_id: ctl.id, source: 'technicien' } });
+          calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: (m.label ? m.label + ' — ' : '') + shortLabel(ctl.description),
+            value: m.value, unit: m.unit, location: ctl.location, control_id: ctl.id, source: 'technicien' } });
         });
       }
       if (!DM.hasResult(ctl) && !attachedControl) {
         const v = verdictFrom(text);
-        if (v && !measures.length) {
+        // série de valeurs (par phase, par pôle…) : le verdict découle du calcul d'écart, sans rien inventer
+        const series = measures.length >= 2 ? DM.agent.analyzeSeries(measures) : null;
+        const expectsBalance = /équilibr|equilibr|écart|ecart|identique|homog/i.test(ctl.expected || '');
+        let sv = null;
+        if (series && series.abnormal) sv = 'non_conforme';
+        else if (series && expectsBalance) sv = 'conforme';
+        if (sv) {
+          const obtained = text + ' — ' + series.summary;
+          calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: obtained, verdict: sv, conclusion: series.summary } });
+          notes.result = { controlId: ctl.id, verdict: sv, obtained: obtained, series: series, unit: measures[0].unit };
+        } else if (v && !measures.length) {
           calls.push({ name: 'record_control_result', input: { control_id: ctl.id, obtained: text, verdict: v } });
           notes.result = { controlId: ctl.id, verdict: v, obtained: text };
         } else if (!/^\s*(je ne sais pas|sais pas)/i.test(text)) notes.awaitVerdict = ctl.id;
@@ -217,8 +280,14 @@
       const yes = yesNo(text);
       const h = DM.findHyp(d, ask.hypothesisId);
       if (yes === true) {
-        calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'confirmee', justification: 'Confirmée par le technicien après un contrôle non conforme.' } });
-        calls.push({ name: 'set_diagnosis_status', input: { status: 'confirme', summary: h.cause, missing: [] } });
+        // repères de composants cités dans les preuves (KM3, Q1, F2…) : le diagnostic nomme l'élément en cause
+        const tags = [];
+        h.evidence.forEach(function (e) {
+          (e.text.match(/\b(?:KM|KA|K|Q|F|QF|X)\d{1,3}\b/g) || []).forEach(function (t) { if (tags.indexOf(t) === -1) tags.push(t); });
+        });
+        const summary = h.cause + (tags.length ? ' — ' + tags.join(', ') : '');
+        calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'confirmee', justification: 'Confirmée par le technicien après des contrôles non conformes concordants.' } });
+        calls.push({ name: 'set_diagnosis_status', input: { status: 'confirme', summary: summary, missing: [] } });
         calls.push({ name: 'suggest_report', input: {} });
         notes.confirmed = h.id;
       } else if (yes === false) {
@@ -241,6 +310,9 @@
 
     if (!d.description && text && !attachedMeasure) {
       calls.push({ name: 'set_fault', input: { description: text, symptoms_add: [text.length > 90 ? text.slice(0, 87) + '…' : text] } });
+      // durée déjà donnée dans la description : mémorisée, la question ne sera pas posée
+      const dur = text.match(DURATION_RE);
+      if (dur) calls.push({ name: 'record_fact', input: { question: QUESTIONS[0].question, answer: dur[1] + ' (d’après la description)', source: 'technicien' } });
       if (!d.name || /^Diagnostic du /.test(d.name)) {
         const title = [brand || d.brand, text.length > 50 ? text.slice(0, 47) + '…' : text].filter(Boolean).join(' — ');
         calls.push({ name: 'update_equipment', input: { name: title } });
@@ -255,7 +327,8 @@
     }
 
     // mesures citées hors d'un contrôle attendu : rattachées au prochain contrôle
-    if (!(ask && ask.kind === 'result') && measures.length && !attachedMeasure) {
+    // (pas dans la description initiale ni dans une réponse à une question : ce sont des données, pas des mesures)
+    if (d.description && (!ask || ask.kind === 'open') && measures.length && !attachedMeasure) {
       const next = DM.nextControl(d);
       measures.forEach(function (m) {
         calls.push({ name: 'save_measurement', input: { kind: DM.kindFromUnit(m.unit), label: next ? shortLabel(next.description) : DM.MEASURE_KINDS[DM.kindFromUnit(m.unit)].label,
@@ -295,13 +368,37 @@
     }
     if (!r) return { calls: calls };
     const ctl = DM.findControl(d, r.controlId);
-    const h = ctl && ctl.hypothesisId ? DM.findHyp(d, ctl.hypothesisId) : null;
+    let h = ctl && ctl.hypothesisId ? DM.findHyp(d, ctl.hypothesisId) : null;
+    // la preuve garde les mots du technicien (repères KM3, L3…) suivis du calcul éventuel
+    const fact = 'Contrôle « ' + shortLabel(ctl.description) + ' » : ' + r.obtained;
+    const alive = d.hypotheses.filter(function (x) { return x.status !== 'ecartee'; });
+
+    // déséquilibre de courant entre phases : défaut électrique localisé plutôt qu'une surcharge globale
+    if (r.verdict === 'non_conforme' && r.series && r.series.abnormal && DM.kindFromUnit(r.unit) === 'courant') {
+      const localized = alive.filter(function (x) { return /contact|pole|enroulement|phase|desequilibr|connexion/.test(DM.normalize(x.cause)); });
+      const self = this;
+      alive.filter(function (x) { return /surcharge/.test(DM.normalize(x.cause)); }).forEach(function (x) {
+        const t = r.series.summary + ' Une surcharge mécanique chargerait les trois phases de la même façon.';
+        calls.push({ name: 'upsert_hypothesis', input: { id: x.id, counter_evidence_add: [t] } });
+        (self.notes.lessLikely = self.notes.lessLikely || []).push({ cause: x.cause, why: t });
+      });
+      if (localized.length && (!h || /surcharge/.test(DM.normalize(h.cause)))) h = localized[0];
+    }
     if (!h) return { calls: calls };
-    const fact = 'Contrôle « ' + ctl.description + ' » : ' + r.obtained;
+
     if (r.verdict === 'non_conforme') {
       calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'suspectee', evidence_add: [fact + ' (non conforme)'] } });
-      calls.push({ name: 'set_diagnosis_status', input: { status: 'probable', summary: h.cause, missing: ['Confirmation de la cause « ' + h.cause + ' »'] } });
-      this.notes.toConfirm = h.id;
+      const nonConf = DM.controlsOf(d, h.id).filter(function (x) { return DM.hasResult(x) && x.verdict === 'non_conforme'; }).length +
+        (ctl.hypothesisId === h.id ? 0 : 1);
+      const tpl = findTemplate(this, h);
+      const done = DM.controlsOf(d, h.id).map(function (x) { return DM.normalize(x.description); });
+      const remaining = tpl ? tpl.controls.filter(function (c) { return done.indexOf(DM.normalize(c.description)) === -1; }).length : 0;
+      calls.push({ name: 'set_diagnosis_status', input: { status: 'probable', summary: h.cause,
+        missing: remaining ? ['Contrôle complémentaire pour confirmer « ' + h.cause + ' »'] : ['Confirmation de la cause « ' + h.cause + ' »'] } });
+      // on ne propose de confirmer qu'une fois le contrôle de confirmation prévu réalisé (ou 3 éléments concordants) :
+      // jamais de réparation définitive sur un simple faisceau d'indices
+      if (nonConf >= 3 || !remaining) this.notes.toConfirm = h.id;
+      else this.notes.suspect = h.id;
     } else if (r.verdict === 'conforme') {
       const others = DM.controlsOf(d, h.id).filter(function (x) { return x.id !== ctl.id && !DM.hasResult(x); });
       const input = { id: h.id, counter_evidence_add: [fact + ' (conforme)'] };
@@ -311,17 +408,24 @@
     return { calls: calls };
   };
 
+  /** Modèle de la base de pannes correspondant à une hypothèse (par sa cause). */
+  function findTemplate(self, h) {
+    return (self.notes.templates || {})[DM.normalize(h.cause)] ||
+      Object.keys(DM.KB).reduce(function (found, k) { return found || DM.KB[k].find(function (t) { return DM.normalize(t.cause) === DM.normalize(h.cause); }); }, null);
+  }
+
   /* 3. Questions essentielles (une seule par tour) */
   LocalProvider.prototype.essentials = function (d) {
     if (this.notes.result || this.notes.awaitVerdict || this.notes.confirmed || this.notes.toConfirm) return null;
     if (d.controls.some(DM.hasResult)) return null; // la recherche est engagée : on ne revient pas aux questions d'ouverture
     if (this.notes.askCodeValue) { this.notes.question = { question: 'Quel code défaut exactement ?', choices: [], kind: 'fact', factId: 'code_valeur' }; return null; }
-    const n = DM.normText([d.description, d.symptoms].join(' '));
+    const raw = [d.description, d.symptoms].join(' ');
+    const n = DM.normText(raw);
     for (let i = 0; i < QUESTIONS.length; i++) {
       const q = QUESTIONS[i];
       if (DM.findFact(d, q.question)) continue;
       if (q.id === 'differentiel' && d.facts.some(function (f) { return /differentiel/.test(DM.normalize(f.question)); })) continue;
-      if (q.when(n, d)) { this.notes.question = { question: q.question, choices: q.choices, kind: 'fact', factId: q.id }; return null; }
+      if (q.when(n, d, raw)) { this.notes.question = { question: q.question, choices: q.choices, kind: 'fact', factId: q.id }; return null; }
     }
     return null;
   };
@@ -356,17 +460,18 @@
     if (this.notes.question) return null;
     const self = this;
     const calls = [];
+    // contrôles déjà présents dans le diagnostic (toutes pistes) : jamais reproposés
+    const existing = d.controls.map(function (c) { return DM.normalize(c.description); });
     d.hypotheses.forEach(function (h) {
       if (h.status === 'ecartee' || DM.controlsOf(d, h.id).some(function (c) { return !DM.hasResult(c); })) return;
-      const tpl = (self.notes.templates || {})[DM.normalize(h.cause)] ||
-        Object.keys(DM.KB).reduce(function (found, k) { return found || DM.KB[k].find(function (t) { return DM.normalize(t.cause) === DM.normalize(h.cause); }); }, null);
+      const tpl = findTemplate(self, h);
       if (!tpl) return;
-      const done = DM.controlsOf(d, h.id).map(function (c) { return DM.normalize(c.description); });
-      const next = tpl.controls.find(function (c) { return done.indexOf(DM.normalize(c.description)) === -1; });
+      const next = tpl.controls.find(function (c) { return existing.indexOf(DM.normalize(c.description)) === -1; });
       if (!next) return;
+      existing.push(DM.normalize(next.description));
       calls.push({ name: 'propose_control', input: {
         hypothesis_id: h.id, description: next.description, type: next.type, expected: next.expected,
-        why: 'Vérifier l’hypothèse « ' + h.cause + ' ».'
+        why: next.why || 'Vérifier l’hypothèse « ' + h.cause + ' ».'
       } });
     });
     return { calls: calls };
@@ -386,12 +491,20 @@
 
     if (notes.confirmed) {
       const h = DM.findHyp(d, notes.confirmed);
-      parts.push('✅ **Diagnostic confirmé : ' + h.cause + '.**\nTu peux procéder à la réparation. Décris-moi ensuite ce qui a été fait (pièces remplacées, réglages) ; le rapport est prêt à être généré.');
+      parts.push('✅ **Diagnostic confirmé : ' + (d.verdict.summary || h.cause) + '.**\nTu peux procéder à la réparation. Décris-moi ensuite ce qui a été fait (pièces remplacées, réglages) ; le rapport est prêt à être généré.');
       return this.finish(parts, null);
     }
+    if (notes.result && notes.result.series) parts.push('📏 ' + notes.result.series.summary);
+    if (notes.suspect && !notes.toConfirm) {
+      const hs = DM.findHyp(d, notes.suspect);
+      parts.push('Résultat **non conforme** : la piste « ' + hs.cause + ' » devient **suspectée**. Un contrôle complémentaire va la confirmer ou l’écarter.');
+    }
+    // pistes affaiblies par le résultat de ce tour (annoncées une seule fois)
+    (notes.lessLikely || []).forEach(function (x) { parts.push('La piste « ' + x.cause + ' » devient peu probable : une surcharge mécanique chargerait les trois phases de la même façon.'); });
     if (notes.toConfirm) {
       const h = DM.findHyp(d, notes.toConfirm);
       parts.push('Résultat **non conforme** : l’hypothèse « ' + h.cause + ' » devient **suspectée** (diagnostic probable).');
+      if (h.evidence.length > 1) parts.push('Éléments concordants :\n' + h.evidence.map(function (e) { return '- ' + e.text; }).join('\n'));
       ask = { question: 'Ce résultat suffit-il à expliquer la panne ? Si oui, je la confirme.', choices: ['Oui, confirmer', 'Non, continuer'], kind: 'confirm' };
       ask.hypothesisId = h.id;
       return this.finish(parts, ask);

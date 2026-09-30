@@ -35,8 +35,25 @@
   };
   DM.symptomChips = function (type) { return (DM.SYMPTOM_CHIPS[type] || []).concat(COMMON_SYMPTOMS); };
 
-  function C(type, description, expected) { return { type: type, description: description, expected: expected }; }
+  function C(type, description, expected, why) { return { type: type, description: description, expected: expected, why: why || '' }; }
   function H(cause, reason, keywords, controls) { return { cause: cause, reason: reason, keywords: keywords, controls: controls }; }
+
+  /* Déclenchements thermiques d'un moteur : la mesure du courant sur CHAQUE phase en régime établi départage
+   * une surcharge mécanique (3 phases chargées) d'un défaut électrique localisé (une phase plus chargée). */
+  const PHASE_CURRENTS = C('sous_tension',
+    'Mesurer l’intensité sur chaque phase (L1, L2, L3) en régime établi, après 30 à 40 min de marche, à la pince ampèremétrique.',
+    'Trois courants proches (écart < 10 %) et inférieurs ou égaux à l’intensité nominale de la plaque.',
+    'Distinguer une surcharge mécanique (trois phases chargées) d’un défaut électrique localisé (une phase plus chargée).');
+  function contactDegrade() {
+    return H('Contact de contacteur dégradé (pôle résistant)',
+      'Un pôle usé ou mal serré présente une résistance de contact : il chauffe, crée un déséquilibre de courant et fait déclencher le relais thermique, d’autant plus que l’armoire est chaude.',
+      ['thermique', 'intermitten', 'apres midi', 'chaleur', 'ete', 'etoile', 'triangle', 'contacteur', 'desequilibr', 'echauff', 'disjonct', 's arrete'],
+      [PHASE_CURRENTS,
+       C('sous_tension', 'Thermographie de l’armoire en charge : contacteurs, relais thermique, borniers.', 'Écart inférieur à 10 °C entre pôles comparables.',
+         'Repérer le point de connexion ou le pôle qui chauffe.'),
+       C('sous_tension', 'Mesurer en charge la chute de tension aux bornes de chaque pôle des contacteurs concernés (voltmètre, calibre adapté).', 'Quelques dizaines de mV, identique sur les trois pôles.',
+         'Confirmer un pôle résistant avant de remplacer le contacteur.')]);
+  }
 
   const KB = {
     electricite: [
@@ -61,6 +78,7 @@
         [C('fonctionnel', 'Réarmer hors charge puis tester le bouton test du différentiel ; si possible, mesurer le seuil et le temps de déclenchement.', 'Réarmement possible ; déclenchement au bouton test ; seuil entre 0,5 et 1 × IΔn.')])
     ],
     electrotechnique: [
+      contactDegrade(),
       H('Défaut du circuit de commande', 'Sans tension de commande (fusible, transformateur, alimentation), aucun organe ne peut être piloté.',
         ['ne demarre', 'commande', 'voyant', 'rien ne se passe', 'pas de reaction', 'aucune reaction', 'eteint'],
         [C('sous_tension', 'Mesurer la tension au secondaire du transformateur de commande et en aval des fusibles de commande.', 'Tension nominale (ex. 24 V AC/DC ou 230 V AC).')]),
@@ -127,6 +145,15 @@
         [C('fonctionnel', 'Comparer le programme et les paramètres avec la dernière sauvegarde de référence.', 'Aucune différence non documentée.')])
     ],
     moteur: [
+      contactDegrade(),
+      H('Réglage du relais thermique inadapté', 'Un réglage trop bas (ou qui ne tient pas compte du montage : In/√3 s’il est placé dans le triangle d’un étoile-triangle) provoque des déclenchements sans défaut réel.',
+        ['thermique', 'etoile', 'triangle', 'reglage', 'regle', 'relais'],
+        [C('visuel', 'Comparer le réglage du relais thermique au courant qu’il surveille (plaque moteur ; In/√3 ≈ 0,58 × In s’il est placé dans le triangle).', 'Réglage cohérent avec le courant surveillé, sans marge excessive ni insuffisante.',
+          'Écarter une cause simple, sans risque, avant de mesurer.')]),
+      H('Échauffement de l’armoire (température ambiante)', 'Le relais thermique est sensible à la température de l’armoire : par forte chaleur il déclenche plus tôt, surtout si le moteur est déjà proche de sa limite.',
+        ['apres midi', 'chaleur', 'ete', 'temperature', 'atelier', 'ventilation'],
+        [C('fluide', 'Mesurer la température intérieure de l’armoire l’après-midi et contrôler sa ventilation (filtres, ventilateur).', 'Température compatible avec la notice du relais (souvent ≤ 40 °C), ventilation fonctionnelle.',
+          'Vérifier si la chaleur aggrave un défaut existant.')]),
       H('Défaut d’alimentation (perte de phase)', 'Une phase manquante fait bourdonner le moteur sans démarrer et provoque un échauffement.',
         ['ne demarre', 'bourdonne', 'ronfle', 'chauffe', 'phase', 'lent', 'disjonct'],
         [C('sous_tension', 'Mesurer les tensions entre phases aux bornes du moteur.', 'Trois tensions présentes et équilibrées (écart < 2 %).')]),
@@ -139,9 +166,11 @@
       H('Roulements usés', 'Bruit, vibration et échauffement côté paliers sont typiques d’une usure de roulements.',
         ['bruit', 'vibration', 'chauffe', 'grince', 'siffle', 'claque', 'roulement'],
         [C('visuel', 'Moteur consigné : tourner l’arbre à la main, contrôler jeu et bruit ; mesure vibratoire si disponible.', 'Rotation libre, sans point dur ni jeu.')]),
-      H('Surcharge mécanique', 'Une charge entraînée trop importante ou grippée fait déclencher le relais thermique.',
-        ['thermique', 'declench', 's arrete', 'chauffe', 'force', 'lent', 'bloque'],
-        [C('sous_tension', 'Mesurer l’intensité absorbée en charge et la comparer à la plaque signalétique.', 'I ≤ In plaque.')]),
+      H('Surcharge mécanique', 'Une charge entraînée trop importante ou grippée (bande trop tendue, roulement, réducteur) fait déclencher le relais thermique.',
+        ['thermique', 'declench', 's arrete', 'chauffe', 'force', 'lent', 'bloque', 'bande', 'retendu', 'roulement', 'reducteur'],
+        [PHASE_CURRENTS,
+         C('visuel', 'Machine consignée : tourner l’arbre à la main, contrôler roulements, tension de bande et réducteur.', 'Rotation libre, sans point dur.',
+           'Rechercher une résistance mécanique anormale.')]),
       H('Couplage incorrect', 'Après un remplacement, un mauvais couplage étoile/triangle donne un moteur lent ou qui chauffe.',
         ['apres remplacement', 'neuf', 'inverse', 'sens', 'couplage', 'lent', 'remplace'],
         [C('hors_tension', 'Vérifier le couplage (étoile/triangle) par rapport à la tension réseau et à la plaque.', 'Couplage conforme à la plaque.')]),

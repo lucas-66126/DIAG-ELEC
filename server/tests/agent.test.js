@@ -313,7 +313,9 @@ test('scénario Mitsubishi complet avec une IA simulée (5 tours, jusqu’à la 
 test('moteur local (hors ligne) : scénario Mitsubishi jusqu’au diagnostic confirmé', async () => {
   let d = newDiag();
   const said = [];
-  for (const msg of ['Ma clim Mitsubishi fait déclencher le C20 extérieur.', 'Environ cinq minutes.', 'Non.', 'Non', 'Référence MUZ-LN35VG', '18,5 A', 'Non conforme', 'Oui, confirmer']) {
+  // V2 : pas de confirmation sur une seule mesure ; le contrôle suivant de la piste est demandé d'abord
+  for (const msg of ['Ma clim Mitsubishi fait déclencher le C20 extérieur.', 'Environ cinq minutes.', 'Non.', 'Non', 'Référence MUZ-LN35VG',
+    '18,5 A', 'Non conforme', 'Condenseur très encrassé, ventilateur freiné', 'Non conforme', 'Oui, confirmer']) {
     userSays(d, msg);
     const out = await DM.agent.runLocalTurn({ diag: d, services: { knowledge: kbService } });
     d = out.diag;
@@ -324,13 +326,59 @@ test('moteur local (hors ligne) : scénario Mitsubishi jusqu’au diagnostic con
   assert.match(said[4], /Contrôle n°1/);
   assert.match(said[4], /RISQUE/);
   assert.match(said[5], /18,5 A/);
-  assert.match(said[7], /Diagnostic confirmé/);
+  assert.match(said[6], /suspectée/);
+  assert.match(said[6], /Contrôle n°2/, 'contrôle complémentaire avant toute confirmation');
+  assert.doesNotMatch(said[6], /je la confirme/);
+  assert.match(said[8], /je la confirme/);
+  assert.match(said[9], /Diagnostic confirmé/);
   assert.equal(d.verdict.status, 'confirme');
   assert.equal(d.brand, 'Mitsubishi');
   assert.equal(d.reference, 'MUZ-LN35VG');
-  // aucune question n'a été posée deux fois
-  const asked = d.messages.filter(m => m.ask).map(m => m.ask.question);
+  // aucune question factuelle n'a été posée deux fois (les demandes de résultat reviennent, une par contrôle)
+  const asked = d.messages.filter(m => m.ask && m.ask.kind === 'fact').map(m => m.ask.question);
+  assert.ok(asked.length >= 3);
   assert.equal(new Set(asked).size, asked.length);
+  const resultAsks = d.messages.filter(m => m.ask && m.ask.kind === 'result').map(m => m.ask.controlId);
+  assert.equal(new Set(resultAsks).size, resultAsks.length, 'jamais deux demandes de résultat pour le même contrôle');
+});
+
+test('moteur local : convoyeur qui disjoncte par intermittence → pôle de KM3 dégradé', async () => {
+  // les mesures ne sont données que si l'application les demande
+  function answer(ask, d) {
+    const q = DM.normalize(ask.question || '');
+    const cd = ask.controlId ? DM.normalize(DM.findControl(d, ask.controlId).description) : '';
+    if (ask.kind === 'confirm') return 'Oui, confirmer';
+    if (/plaque moteur/.test(q)) return 'Moteur 400 V, 11 kW, 21 A, étoile-triangle (KM1, KM2, KM3), relais thermique F2 réglé à 12,5 A dans le triangle.';
+    if (/intensite sur chaque phase/.test(cd)) return 'Après 40 min : L1 : 20,1 A · L2 : 20,6 A · L3 : 26,4 A';
+    if (/thermographie/.test(cd)) return 'Un pôle de KM3 à 87 °C, les autres à environ 45 °C';
+    if (/chute de tension/.test(cd)) return 'KM3 en charge : 0,08 V · 0,09 V · 3,7 V';
+    throw new Error('Question inattendue : ' + ask.question + ' / ' + cd);
+  }
+  let d = newDiag();
+  let msg = 'Convoyeur à bande, ligne n°2 : le moteur disjoncte par intermittence, surtout l’après-midi. Le voyant défaut thermique s’allume. ' +
+    'On réarme, ça repart, puis ça recommence 30 à 50 minutes plus tard. Roulements remplacés il y a 3 semaines, bande retendue il y a 2 mois. Atelier à 32 °C.';
+  const asked = [];
+  for (let i = 0; i < 8; i++) {
+    userSays(d, msg);
+    const out = await DM.agent.runLocalTurn({ diag: d, services: {} });
+    d = out.diag;
+    if (d.verdict.status === 'confirme') break;
+    asked.push(out.ask.question);
+    msg = answer(out.ask, d);
+  }
+  // questions pertinentes seulement : ni délai (déjà donné), ni différentiel (défaut thermique), ni code défaut
+  assert.ok(!asked.some(q => /combien de temps|différentiel|code défaut/.test(q)), asked.join(' | '));
+  assert.equal(d.verdict.status, 'confirme');
+  assert.match(d.verdict.summary, /Contact de contacteur dégradé.*KM3/);
+  // confirmation seulement après le contrôle de chute de tension (pas sur la seule thermographie)
+  assert.ok(d.controls.some(c => /chute de tension/.test(c.description) && c.verdict === 'non_conforme'));
+  const surcharge = d.hypotheses.find(h => /Surcharge/.test(h.cause));
+  assert.ok(surcharge.counterEvidence.length >= 1, 'le déséquilibre contredit la surcharge mécanique');
+  assert.equal(d.measurements.filter(m => m.unit === 'A').map(m => m.label.slice(0, 2)).join(','), 'L1,L2,L3');
+  const series = DM.agent.analyzeSeries(DM.agent.parseMeasurements('L1 : 20,1 A · L2 : 20,6 A · L3 : 26,4 A'));
+  assert.equal(series.abnormal, true);
+  assert.equal(series.outlier.label, 'L3');
+  assert.equal(DM.agent.analyzeSeries(DM.agent.parseMeasurements('13,1 A / 13,4 A / 13,2 A')).abnormal, false);
 });
 
 test('moteur local : « je ne sais pas » et piste écartée par un résultat conforme', async () => {
