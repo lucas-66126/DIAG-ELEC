@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DIAG-MAINT — Politique de confidentialité</title>
+  <meta name="color-scheme" content="light dark">
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 46rem; margin: 0 auto; padding: 20px 16px 48px; background: Canvas; color: CanvasText; }
+    h1 { font-size: 1.5rem; line-height: 1.25; }
+    h2 { font-size: 1.1rem; margin-top: 1.8em; }
+    .muted { opacity: .75; font-size: .9rem; }
+    a { color: LinkText; }
+  </style>
+</head>
+<body>
+  <h1>DIAG-MAINT — Politique de confidentialité</h1>
+  <p class="muted">Dernière mise à jour : 2 octobre 2026</p>
+
+  <p>DIAG-MAINT est une application d’aide au diagnostic de pannes pour les techniciens de maintenance.
+    Cette page décrit les données que l’application traite et l’endroit où elles se trouvent.</p>
+
+  <h2>Ce qui reste sur votre appareil</h2>
+  <p>Vos diagnostics, vos mesures, vos photos, vos équipements et vos réglages sont enregistrés
+    <strong>uniquement sur votre appareil</strong>, dans le stockage de l’application. Sans serveur d’IA configuré,
+    aucune de ces données ne quitte l’appareil : le moteur de diagnostic fonctionne entièrement hors connexion.</p>
+
+  <h2>Ce qui est envoyé si vous activez l’assistant IA</h2>
+  <p>L’assistant IA est facultatif. Il n’est actif que si une adresse de serveur est renseignée dans
+    <em>Réglages → Serveur IA</em>. Dans ce cas, à chaque message, l’application envoie à ce serveur :</p>
+  <ul>
+    <li>le diagnostic en cours (description de la panne, matériel, mesures, contrôles, conversation) ;</li>
+    <li>les photos que vous joignez à votre message ;</li>
+    <li>un résumé de vos diagnostics terminés, pour retrouver les pannes similaires.</li>
+  </ul>
+  <p>Le serveur transmet ces éléments au service d’intelligence artificielle d’Anthropic (modèle Claude) pour produire
+    la réponse. Ils sont traités selon les conditions d’utilisation et la politique de confidentialité d’Anthropic.
+    Les documents techniques que vous ajoutez à la base documentaire sont stockés sur le serveur que vous avez configuré.</p>
+
+  <h2>Ce que l’application ne fait pas</h2>
+  <ul>
+    <li>Pas de compte utilisateur, pas d’identifiant publicitaire.</li>
+    <li>Pas de publicité, pas de traceur, pas de mesure d’audience.</li>
+    <li>Pas d’accès à vos contacts, à votre position ni à vos autres applications.</li>
+    <li>Aucune revente ni cession de données.</li>
+  </ul>
+
+  <h2>Autorisations</h2>
+  <p>L’appareil photo et la galerie ne sont utilisés que lorsque vous choisissez d’ajouter une photo à un diagnostic.
+    Le microphone n’est utilisé que si vous lancez vous-même la dictée d’un message, quand elle est disponible.</p>
+
+  <h2>Supprimer vos données</h2>
+  <p>Vous pouvez supprimer un diagnostic depuis l’historique, ou tout effacer depuis <em>Réglages</em>.
+    Désinstaller l’application supprime toutes les données enregistrées sur l’appareil.</p>
+
+  <h2>Sécurité des interventions</h2>
+  <p>Les suggestions de l’application sont une aide. Le technicien reste responsable de ses conclusions et du respect
+    des règles de sécurité applicables (habilitation, consignation, consignes du site).</p>
+
+  <h2>Contact</h2>
+  <p>Pour toute question ou demande concernant vos données :
+    <a href="https://github.com/lucas-66126/DIAG-ELEC/issues">github.com/lucas-66126/DIAG-ELEC/issues</a>.</p>
+</body>
+</html>

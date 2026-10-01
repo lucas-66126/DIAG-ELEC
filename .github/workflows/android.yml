@@ -1,0 +1,84 @@
+name: Application Android
+
+# Fabrique l'application Android à chaque modification de l'interface ou du projet mobile,
+# ou à la demande (onglet Actions → Application Android → Run workflow).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'confidentialite.html'
+      - 'manifest.webmanifest'
+      - 'css/**'
+      - 'js/**'
+      - 'icons/**'
+      - 'mobile/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fabriquer:
+    runs-on: ubuntu-latest
+    env:
+      # Présents seulement si la clé de signature a été enregistrée dans les secrets du dépôt.
+      KEYSTORE_BASE64: ${{ secrets.DIAGMAINT_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Tests de l'application
+        working-directory: server
+        run: |
+          npm ci
+          npm test
+
+      - name: Dépendances de l'enveloppe Android
+        working-directory: mobile
+        run: npm ci
+
+      - name: Fichiers embarqués et synchronisation
+        working-directory: mobile
+        run: npm run sync
+
+      - name: Version d'essai (APK à installer directement sur un téléphone)
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diag-maint-essai-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Version de publication signée (AAB pour le Play Store)
+        if: env.KEYSTORE_BASE64 != ''
+        working-directory: mobile/android
+        env:
+          DIAGMAINT_KEYSTORE_FILE: ${{ runner.temp }}/diagmaint-upload.p12
+          DIAGMAINT_KEYSTORE_PASSWORD: ${{ secrets.DIAGMAINT_KEYSTORE_PASSWORD }}
+          DIAGMAINT_KEY_ALIAS: ${{ secrets.DIAGMAINT_KEY_ALIAS }}
+          DIAGMAINT_KEY_PASSWORD: ${{ secrets.DIAGMAINT_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$DIAGMAINT_KEYSTORE_FILE"
+          ./gradlew --no-daemon bundleRelease
+          rm -f "$DIAGMAINT_KEYSTORE_FILE"
+
+      - uses: actions/upload-artifact@v4
+        if: env.KEYSTORE_BASE64 != ''
+        with:
+          name: diag-maint-play-store-aab
+          path: mobile/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error

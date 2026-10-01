@@ -210,7 +210,8 @@
   document.addEventListener('DOMContentLoaded', function () {
     app.render();
     if (!DM.store.persistent) DM.ui.toast('Stockage local indisponible : les données ne seront pas conservées.', 'error');
-    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    // dans l'application Android, les fichiers sont embarqués : pas de service worker
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !DM.isNativeApp()) {
       // quand une nouvelle version prend la main, la page est rechargée une fois pour l'afficher
       const hadController = !!navigator.serviceWorker.controller;
       let reloaded = false;

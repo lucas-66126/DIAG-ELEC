@@ -14,7 +14,8 @@
   function serverUrl() {
     const s = settings();
     if (s.serverUrl) return String(s.serverUrl).replace(/\/+$/, '');
-    if (/^https?:$/.test(location.protocol) && !/github\.io$/i.test(location.hostname)) return location.origin;
+    // (dans l'application Android, la page ne vient pas d'un serveur DIAG-MAINT : seul le réglage compte)
+    if (/^https?:$/.test(location.protocol) && !/github\.io$/i.test(location.hostname) && !DM.isNativeApp()) return location.origin;
     return '';
   }
 

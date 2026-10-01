@@ -5,7 +5,7 @@ const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/styles.css',
   './js/pannes/electricite.js', './js/pannes/electrotechnique.js', './js/pannes/moteur.js', './js/pannes/pompe.js', './js/pannes/hvac.js',
   './js/pannes/automatisme.js', './js/pannes/acces.js', './js/pannes/incendie.js', './js/pannes/industriel.js',
-  './js/utils.js', './js/icons.js', './js/safety.js', './js/knowledge.js', './js/model.js', './js/report.js', './js/kb.js',
+  './js/utils.js', './js/native.js', './js/icons.js', './confidentialite.html', './js/safety.js', './js/knowledge.js', './js/model.js', './js/report.js', './js/kb.js',
   './js/store.js', './js/photos.js', './js/sync.js', './js/ui.js', './js/app.js',
   './js/agent/tools.js', './js/agent/engine.js', './js/agent/local-provider.js', './js/agent/client.js',
   './js/views/home.js', './js/views/form.js', './js/views/agent.js', './js/views/diag.js', './js/views/report.js',

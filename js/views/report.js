@@ -72,12 +72,16 @@
         back: '#/diag/' + idq,
         html:
           '<div class="report-tools no-print">' +
-            '<button type="button" class="btn btn--primary" data-action="print">' + icon('print') + 'Exporter en PDF</button>' +
-            '<button type="button" class="btn btn--ghost" data-action="share">' + icon('share') + 'Partager</button>' +
+            (DM.isNativeApp()
+              ? '<button type="button" class="btn btn--primary" data-action="share">' + icon('share') + 'Partager le rapport</button>'
+              : '<button type="button" class="btn btn--primary" data-action="print">' + icon('print') + 'Exporter en PDF</button>' +
+                '<button type="button" class="btn btn--ghost" data-action="share">' + icon('share') + 'Partager</button>') +
             '<button type="button" class="btn btn--ghost" data-action="copy">' + icon('copy') + 'Copier</button>' +
             '<button type="button" class="btn btn--ghost" data-action="txt">' + icon('download') + '.txt</button>' +
           '</div>' +
-          '<p class="small muted no-print">« Exporter en PDF » ouvre l’impression : choisis « Enregistrer au format PDF ».' +
+          '<p class="small muted no-print">' + (DM.isNativeApp()
+            ? '« Partager le rapport » l’envoie par message, courriel ou vers une autre application.'
+            : '« Exporter en PDF » ouvre l’impression : choisis « Enregistrer au format PDF ».') +
             (r.technician ? '' : ' Renseigne ton nom dans <a href="#/parametres">Réglages</a> pour qu’il apparaisse.') + '</p>' +
           '<article class="report" id="report">' +
             '<header class="rp-head"><div class="rp-brand">' + icon('bolt') + '<div><strong>DIAG-MAINT</strong><span>Rapport d’intervention</span></div></div>' +
@@ -119,6 +123,11 @@
       'share': function (el, e, p) {
         const d = DM.store.get(p.id);
         const t = DM.reportToText(DM.buildReport(d, DM.store.settings()));
+        if (DM.isNativeApp() && DM.native) {
+          return DM.native.shareText('Rapport ' + d.name, t).catch(function () {
+            return copyText(t).then(function () { ui.toast('Partage indisponible : texte copié dans le presse-papiers', 'success'); });
+          });
+        }
         if (navigator.share) {
           return navigator.share({ title: 'Rapport ' + d.name, text: t }).catch(function (err) {
             if (err && err.name !== 'AbortError') throw err;

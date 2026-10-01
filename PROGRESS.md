@@ -88,3 +88,14 @@ plus bas. Chaque échec devient un cas de la banque et une cause de plus dans la
   changé : scénario Mitsubishi local (« condenseur très encrassé » est compris sans redemander le verdict).
   Corrigé en route : la consigne « batteries » s'affichait pour les batteries d'échange d'une climatisation ;
   `/tests/` renvoyait une erreur 404 (il fallait `/tests/index.html`).
+
+## Application Android — préparation Play Store (2026-10-02)
+- ✅ Projet Android (Capacitor) dans `mobile/` : interface embarquée, hors connexion, icônes, écran de démarrage.
+- ✅ Adaptations : partage du rapport et des exports par la feuille de partage Android, pas de service worker,
+  serveur IA uniquement s'il est renseigné dans les réglages.
+- ✅ Fabrication automatique par GitHub (`.github/workflows/android.yml`) : APK d'essai à chaque envoi, AAB signé quand la clé
+  de signature est dans les secrets du dépôt.
+- ✅ Politique de confidentialité (`confidentialite.html`), fiche et réponses aux formulaires (`mobile/play-store/FICHE.md`).
+- ⬜ Jamais fabriqué ni installé sur un téléphone : la première fabrication se fera au premier envoi sur GitHub.
+- 🔌 Compte développeur Google Play, clé de signature, captures d'écran, test fermé.
+- 🔌 Serveur hébergé en HTTPS pour proposer l'assistant IA dans l'application mobile.

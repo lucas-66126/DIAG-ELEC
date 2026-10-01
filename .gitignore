@@ -4,3 +4,12 @@ server/data/
 server/node_modules/
 server/tests/.tmp*/
 *.log
+
+# Application Android : dépendances et fichiers fabriqués
+mobile/node_modules/
+mobile/www/
+# Clés de signature : jamais versionnées
+*.jks
+*.keystore
+*.p12
+keystore.properties

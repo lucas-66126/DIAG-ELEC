@@ -10,6 +10,11 @@
   }
 
   function download(filename, text, mime) {
+    // application Android : pas de téléchargement possible depuis la page, on passe par le partage de fichier
+    if (DM.isNativeApp() && DM.native) {
+      DM.native.shareFile(filename, text).catch(function (e) { DM.ui.toast('Export impossible : ' + (e.message || e), 'error'); });
+      return;
+    }
     const blob = new Blob([text], { type: mime || 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -102,7 +107,8 @@
               '<button type="button" class="btn btn--danger-ghost btn--block" data-action="wipe">' + icon('trash') + 'Effacer toutes les données</button>' +
             '</div></section>' +
           '<p class="small muted center">DIAG-MAINT v' + DM.VERSION + ' — assistant de diagnostic. Les suggestions sont une aide : ' +
-          'le technicien reste responsable de ses conclusions et du respect des règles de sécurité.</p>'
+          'le technicien reste responsable de ses conclusions et du respect des règles de sécurité.<br>' +
+          '<a href="confidentialite.html">Politique de confidentialité</a></p>'
       };
     },
     mount: function (root) {

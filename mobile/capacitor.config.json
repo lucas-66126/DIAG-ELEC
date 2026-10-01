@@ -1,0 +1,9 @@
+{
+  "appId": "io.github.lucas66126.diagmaint",
+  "appName": "DIAG-MAINT",
+  "webDir": "www",
+  "backgroundColor": "#111418",
+  "android": {
+    "allowMixedContent": false
+  }
+}

@@ -47,5 +47,11 @@ window.DM = window.DM || {};
 
   DM.clone = function (o) { return JSON.parse(JSON.stringify(o)); };
 
+  /** Vrai dans l'application Android (enveloppe Capacitor), faux dans un navigateur. */
+  DM.isNativeApp = function () {
+    const c = typeof window !== 'undefined' ? window.Capacitor : null;
+    return !!(c && (typeof c.isNativePlatform === 'function' ? c.isNativePlatform() : c.isNative));
+  };
+
   DM.plural = function (n, one, many) { return n + ' ' + (n > 1 ? (many || one + 's') : one); };
 })(window.DM);

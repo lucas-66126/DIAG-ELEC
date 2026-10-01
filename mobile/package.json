@@ -1,0 +1,22 @@
+{
+  "name": "diag-maint-mobile",
+  "version": "2.2.0",
+  "description": "DIAG-MAINT — application Android (enveloppe Capacitor autour de l'application web)",
+  "private": true,
+  "scripts": {
+    "www": "node build-www.js",
+    "sync": "node build-www.js && npx cap sync android",
+    "icones": "node build-icons.js && npx capacitor-assets generate --android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/share": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.2"
+  },
+  "license": "UNLICENSED"
+}
