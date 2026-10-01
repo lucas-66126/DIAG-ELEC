@@ -24,16 +24,31 @@
   const TYPE_RULES = [
     // surveillance d'isolement : c'est l'installation électrique qui est en cause, pas la pompe ou la machine citée
     ['electricite', ['cpi', 'controleur permanent', 'regime it', 'neutre isole', 'defaut d isolement']],
-    ['hvac', ['clim', 'climatis', 'split', 'pac ', 'pompe a chaleur', 'groupe froid', 'cta', 'vmc', 'rooftop', 'unite exterieure', 'unite interieure', 'chaudiere']],
-    ['incendie', ['ssi', 'incendie', 'desenfum', 'detecteur', 'ecs', 'cmsi', 'alarme incendie', 'alarme feu', 'declencheur manuel', 'boucle de detection', 'boucles adressables', 'isolateur', 'erp']],
-    ['acces', ['badge', 'gache', 'ventouse', 'controle d acces', 'interphone', 'lecteur de badge', 'visiophone']],
-    ['pompe', ['pompe', 'surpresseur', 'relevage', 'circulateur']],
-    ['automatisme', ['automate', 'api ', 'plc', 'ihm', 'hmi', 'profinet', 'modbus']],
-    ['moteur', ['moteur', 'variateur']],
-    ['industriel', ['machine', 'convoyeur', 'presse', 'robot', 'verin', 'hydraulique', 'pneumatique']],
-    ['electrotechnique', ['contacteur', 'armoire', 'relais', 'telerupteur', 'coffret']],
-    ['electricite', ['disjonct', 'differentiel', 'tableau', 'prise', 'eclairage', 'circuit', 'tgbt', 'fusible']]
+    ['hvac', ['clim', 'climatis', 'split', 'ventilo', 'vitrine refrigeree', 'aerotherme', 'pac ', 'pompe a chaleur', 'groupe froid', 'cta', 'vmc', 'rooftop', 'unite exterieure', 'unite interieure', 'chaudiere',
+      'bruleur', 'chambre froide', 'evaporateur', 'condenseur', 'frigorifique', 'centrale de traitement', 'ventilo convecteur', 'radiateurs', 'circuit de chauffage', 'condensats']],
+    ['incendie', ['ssi', 'incendie', 'desenfum', 'detecteur de fumee', 'detecteur optique', 'detecteur automatique', 'detecteurs', 'ecs', 'cmsi', 'alarme incendie', 'alarme feu',
+      'declencheur manuel', 'boucle de detection', 'boucles adressables', 'isolateur', 'erp', 'baes', 'bloc de secours', 'eclairage de securite', 'coupe feu', 'clapet',
+      'sirene', 'diffuseur sonore', 'aes', 'centrale incendie', 'zone de detection']],
+    ['acces', ['badge', 'gache', 'ventouse', 'controle d acces', 'interphone', 'lecteur de badge', 'visiophone', 'portail', 'barriere levante', 'digicode', 'bouton de sortie', 'porte forcee']],
+    ['pompe', ['pompe', 'surpresseur', 'relevage', 'circulateur', 'forage', 'refoulement']],
+    ['automatisme', ['automate', 'api ', 'plc', 'ihm', 'hmi', 'profinet', 'profibus', 'modbus', 'capteur', 'detecteur inductif', 'cellule photo', 'cellule de', 'comptage', 'cycle', 'grafcet', 'electrovanne',
+      '4 20', 'entree', 'pupitre']],
+    ['moteur', ['moteur', 'variateur', 'ventilateur d extraction', 'roulement']],
+    ['industriel', ['machine', 'convoyeur', 'presse', 'robot', 'verin', 'hydraulique', 'pneumatique', 'compresseur d air', 'reducteur', 'motoreducteur', 'courroie', 'palier',
+      'bande', 'chaine', 'air comprime', 'carter', 'malaxeur']],
+    ['electrotechnique', ['contacteur', 'armoire', 'relais', 'telerupteur', 'coffret', 'bouton marche', 'etoile triangle', 'circuit de commande', 'arret d urgence', 'bobine']],
+    ['electricite', ['disjonct', 'differentiel', 'tableau', 'prise', 'eclairage', 'circuit', 'tgbt', 'fusible', 'neutre', 'installation electrique', 'compteur electrique',
+      'lumiere', 'minuterie', 'four', 'candelabre', 'sectionneur']]
   ];
+  /** Nombre d'indices de chaque domaine dans un texte normalisé : {moteur: 2, pompe: 1…} (sert aussi à croiser les domaines cités). */
+  DM.typeScores = function (n) {
+    const out = {};
+    TYPE_RULES.forEach(function (r) {
+      const score = r[1].filter(function (k) { return DM.hasKeyword(n, k); }).length;
+      if (score) out[r[0]] = (out[r[0]] || 0) + score;
+    });
+    return out;
+  };
 
   const UNIT_RE = /([<>≥≤]\s*)?(?:(\d+(?:[.,]\d+)?)\s*(?:à|-)\s*)?(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
   const UNIT_NORM = { uf: 'µF', ohm: 'Ω', ohms: 'Ω', kohm: 'kΩ', kohms: 'kΩ', mohm: 'MΩ', mohms: 'MΩ', vac: 'V AC', vdc: 'V DC', 'v ac': 'V AC', 'v dc': 'V DC',
@@ -149,12 +164,31 @@
   }
   function verdictFrom(text) {
     const n = DM.normText(text);
-    if (has(n, ['non conforme', 'pas conforme', 'hors tolerance', 'anormal', 'mauvais', 'hs ', 'ne fonctionne pas', 'instable'])) return 'non_conforme';
+    if (has(n, ['non conforme', 'pas conforme', 'hors tolerance', 'pas bon', 'pas normal', 'pas correct', 'pas ok', 'pas terrible', 'pas net'])) return 'non_conforme';
     // « Tronçon 2.31 à 2.39 : défaut » : le technicien signale lui-même un défaut
     if (/:\s*(?:en\s+)?d[ée]faut\b/i.test(text)) return 'non_conforme';
-    if (has(n, ['conforme', 'normal', 'bon ', 'bons ', 'ok ', 'fonctionnent', 'fonctionne correctement', 'fonctionne parfaitement', 'sain '])) return 'conforme';
+    // tournures négatives courantes : « rien d'anormal », « aucun défaut », « RAS »
+    if (has(n, NOTHING_WRONG)) return 'conforme';
+    if (has(n, ['anormal', 'mauvais', 'hs ', 'ne fonctionne pas', 'instable', 'defectueu', 'hors service'])) return 'non_conforme';
+    if (hasFinding(n)) return 'non_conforme';
+    if (has(n, ['conforme', 'normal', 'bon ', 'bons ', 'bonne ', 'bonnes ', 'ok ', 'correct', 'fonctionnent', 'fonctionne correctement', 'fonctionne parfaitement',
+      'fonctionne bien', 'sain ', 'saine ', 'sains ', 'propre', 'intact'])) return 'conforme';
     if (has(n, ['je ne sais pas', 'sais pas', 'indetermine'])) return 'indetermine';
     return null;
+  }
+  const NOTHING_WRONG = ['rien d anormal', 'rien a signaler', 'ras ', 'aucune anomalie', 'aucun defaut', 'pas de defaut', 'pas d anomalie', 'sans anomalie', 'sans defaut'];
+  const NEGATIONS = ['pas', 'aucun', 'aucune', 'sans', 'ni', 'non', 'absence', 'rien', 'jamais'];
+  /** Vrai si le texte rapporte une anomalie constatée (« bobine coupée »), sauf si elle est niée (« pas de fuite », « ni oxydation »). */
+  function hasFinding(nt) {
+    return FINDINGS.some(function (k) {
+      let i = nt.indexOf(' ' + k);
+      while (i !== -1) {
+        const before = nt.slice(0, i).trim().split(' ').slice(-3);
+        if (!before.some(function (w) { return NEGATIONS.indexOf(w) !== -1; })) return true;
+        i = nt.indexOf(' ' + k, i + 1);
+      }
+      return false;
+    });
   }
 
   /** Valeur en MΩ d'une mesure de résistance / d'isolement (null si l'unité ne s'y prête pas). */
@@ -213,10 +247,25 @@
   /** Constats visuels qui signent un défaut (inspection, localisation). */
   const FINDINGS = ['vert de gris', 'oxyd', 'condensation', 'humid', 'ruissel', 'mal serre', 'desserr', 'ecrase', 'brul', 'noirci', 'fissur',
     'casse', 'absent apres', 'disparait', 'infiltration', 'corrod', 'eau dans', 'traces d eau', 'traverse', 'perce', 'blesse', 'abime',
-    'endommag', 'denude', 'frotte', 'pince', 'coince', 'arrache', 'sectionn'];
+    'endommag', 'denude', 'frotte', 'pince', 'coince', 'arrache', 'sectionn',
+    'coupee', 'coupees', 'fil coupe', 'conducteur coupe', 'enroulement coupe', 'circuit ouvert', 'coupure', 'infini', 'fondu', 'grille', 'bloque', 'grippe',
+    'use ', 'usee', 'uses ', 'usees', 'usure', 'fuit', 'fuite', 'colmat', 'encrass', 'bouchee', 'bouche par',
+    'obstru', 'detendu', 'desalign', 'point dur', 'gonfle', 'ne reagit pas', 'ne change pas', 'soude', 'fendu', 'dechire', 'absente', 'manquant',
+    'nulle', 'sale', 'charbonn', 'piqu', 'jeu important', 'jeu anormal', 'trop bas', 'trop haut', 'trop faible', 'trop eleve', 'trop court', 'trop long', 'trop loin',
+    'insuffisant', 'ne tourne pas', 'ne demarre pas', 'ne bascule pas', 'ne colle pas', 'ne s allume pas', 'ne bouge pas', 'ne se fait pas', 'laiteu', 'mousse',
+    'limaille', 'craquel', 'deboit', 'deregl', 'mal regle', 'mal aligne', 'decale', 'tordu', 'deforme', 'rotor colle', 'tiroir colle', 'reste colle', 'rouille', 'lustre',
+    'en court circuit', 'au rouge', 'cuve vide', 'degonfle', 'filasse', 'lingette', 'enroule', 'hernie', 'affaisse', 'il force', 'qui force', 'saute des dents',
+    'de l eau sort', 'retire', 'enfonce', 'mal verrouille', 'couchees', 'plein de', 'pleine de', 'ouvert en permanence', 'reste ferme', 'reste ouvert',
+    'ne tient pas', 's ecroule', 'chute a', 'tombe a', 'ne recoit pas', 'ne voit pas', 'n arrive pas', 'aucune tension', 'pas de tension', 'plus de tension'];
 
   /** Durée déjà indiquée dans la description (« 30 à 50 minutes », « après 5 min », « jusqu'à 11h »…). */
   const DURATION_RE = /(\d+\s*(?:(?:à|a|-)\s*\d+\s*)?(?:min(?:ute)?s?|h(?:eures?)?\b|s(?:econdes?)?\b))/i;
+  /** La panne est-elle un déclenchement de protection ? (« ça saute de 10 à 90 % » n’en est pas un) */
+  function tripping(n) {
+    return has(n, ['disjonct', 'fusible', 'se met en securite']) ||
+      (has(n, ['declench']) && !has(n, ['alarme', 'sirene', 'detecteur', 'degivrage'])) ||
+      (has(n, ['declench', 'saute', 'coupe', 's arrete']) && has(n, ['protection', 'thermique', 'differentiel', 'plomb', 'courant', 'general', 'tableau', 'relais']));
+  }
   function thermalTrip(n) { return has(n, ['thermique', 'relais thermique', 'defaut thermique']); }
   /** Surveillance d'isolement (CPI, régime IT) : défaut d'installation, pas d'un matériel précis. */
   function isolationMonitor(n) { return has(n, ['cpi', 'controleur permanent', 'regime it']); }
@@ -230,10 +279,10 @@
   const QUESTIONS = [
     { id: 'delai', question: 'Au bout de combien de temps de fonctionnement la protection déclenche-t-elle ?',
       choices: ['Immédiatement', 'Après quelques minutes', 'De façon aléatoire'],
-      when: function (n, d, raw) { return has(n, ['disjonct', 'declench', 'saute', 'coupe', 's arrete']) && !DURATION_RE.test(raw); } },
+      when: function (n, d, raw) { return tripping(n) && !DURATION_RE.test(raw); } },
     { id: 'differentiel', question: 'Le différentiel en amont déclenche-t-il également ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
       // inutile quand le défaut est clairement thermique (relais thermique identifié)
-      when: function (n) { return has(n, ['disjonct', 'declench', 'saute']) && !has(n, ['differentiel']) && !thermalTrip(n); } },
+      when: function (n) { return tripping(n) && !has(n, ['differentiel']) && !thermalTrip(n); } },
     { id: 'code', question: 'Un code défaut est-il affiché (télécommande, carte électronique, écran) ?', choices: ['Oui', 'Non', 'Je ne sais pas'],
       when: function (n, d) {
         return (['hvac', 'automatisme', 'incendie', 'acces'].indexOf(d.installationType) !== -1 || has(n, ['variateur', 'automate', 'ecran', 'carte'])) &&
@@ -380,10 +429,12 @@
           // série de valeurs (par phase, par pôle…) : le verdict découle du calcul d'écart, sans rien inventer
           const series = DM.agent.analyzeSeries(measures);
           const expectsBalance = /équilibr|equilibr|écart|ecart|identique|homog/i.test(ctl.expected || '');
-          if (series && (series.abnormal || expectsBalance)) auto = { verdict: series.abnormal ? 'non_conforme' : 'conforme', summary: series.summary, series: series };
-        }
-        if (!auto && !measures.length && FINDINGS.some(function (k) { return DM.hasKeyword(nt, k); })) {
-          auto = { verdict: 'non_conforme', summary: 'Anomalie constatée.' };
+          // des valeurs homogènes ne suffisent pas quand l'attendu fixe aussi un seuil (« … et inférieurs à l'intensité de la plaque ») :
+          // le calcul d'écart est annoncé, mais c'est le technicien qui compare à la plaque
+          const hasThreshold = /plaque|nominal/i.test(ctl.expected || '');
+          // le calcul d'écart ne vaut verdict que si le contrôle attend des valeurs homogènes (phases, pôles, enroulements)
+          if (series && expectsBalance && (series.abnormal || !hasThreshold)) auto = { verdict: series.abnormal ? 'non_conforme' : 'conforme', summary: series.summary, series: series };
+          else if (series && expectsBalance && !v) notes.seriesNote = series.summary;
         }
         if (auto) {
           const obtained = auto.summary === 'Anomalie constatée.' ? text : text + ' — ' + auto.summary;
@@ -420,6 +471,7 @@
         notes.confirmed = h.id;
       } else if (yes === false) {
         notes.notConfirmed = h.id;
+        calls.push({ name: 'record_fact', input: { question: 'Confirmation de « ' + h.cause + ' »', answer: 'Non — le technicien veut poursuivre les contrôles', source: 'technicien' } });
       }
     } else if (ask && (ask.kind === 'fact' || ask.kind === 'open') && ask.question) {
       calls.push({ name: 'record_fact', input: { question: ask.question, answer: normalizeAnswer(text), source: 'technicien' } });
@@ -501,16 +553,37 @@
     const fact = 'Contrôle « ' + shortLabel(ctl.description) + ' » : ' + r.obtained;
     const alive = d.hypotheses.filter(function (x) { return x.status !== 'ecartee'; });
 
+    // courants par phase : la série est recalculée à partir des mesures enregistrées quand le verdict vient du technicien
+    if (!r.series && /chaque phase/.test(DM.normalize(ctl.description))) {
+      const ms = DM.measurementsOf(d, ctl.id).filter(function (m) { return DM.kindFromUnit(m.unit) === 'courant'; });
+      const series = DM.agent.analyzeSeries(ms.map(function (m) { return { value: m.value, unit: m.unit, label: s(m.label).split(' — ')[0] }; }));
+      if (series) { r.series = series; r.unit = ms[0].unit; }
+    }
+    const isSurcharge = function (x) { return /surcharge|surintensit/.test(DM.normalize(x.cause)); };
+    const isLocalized = function (x) { return /contact|pole|enroulement|phase|desequilibr|connexion/.test(DM.normalize(x.cause)); };
     // déséquilibre de courant entre phases : défaut électrique localisé plutôt qu'une surcharge globale
     if (r.verdict === 'non_conforme' && r.series && r.series.abnormal && DM.kindFromUnit(r.unit) === 'courant') {
-      const localized = alive.filter(function (x) { return /contact|pole|enroulement|phase|desequilibr|connexion/.test(DM.normalize(x.cause)); });
+      const localized = alive.filter(isLocalized);
       const self = this;
-      alive.filter(function (x) { return /surcharge/.test(DM.normalize(x.cause)); }).forEach(function (x) {
-        const t = r.series.summary + ' Une surcharge mécanique chargerait les trois phases de la même façon.';
+      alive.filter(isSurcharge).forEach(function (x) {
+        const t = fact + ' — une surcharge mécanique chargerait les trois phases de la même façon.';
         calls.push({ name: 'upsert_hypothesis', input: { id: x.id, counter_evidence_add: [t] } });
-        (self.notes.lessLikely = self.notes.lessLikely || []).push({ cause: x.cause, why: t });
+        (self.notes.lessLikely = self.notes.lessLikely || []).push({ cause: x.cause, why: 'une surcharge mécanique chargerait les trois phases de la même façon' });
       });
-      if (localized.length && (!h || /surcharge/.test(DM.normalize(h.cause)))) h = localized[0];
+      if (localized.length && (!h || isSurcharge(h))) h = localized[0];
+    }
+    // trois courants élevés mais équilibrés : c'est la charge qui est en cause, pas un pôle ni une phase
+    if (r.verdict === 'non_conforme' && r.series && !r.series.abnormal && DM.kindFromUnit(r.unit) === 'courant') {
+      const overload = alive.filter(isSurcharge);
+      const self = this;
+      if (overload.length) {
+        alive.filter(function (x) { return isLocalized(x) && !isSurcharge(x); }).forEach(function (x) {
+          const t = fact + ' — courants équilibrés : un pôle ou une phase en défaut déséquilibrerait les courants.';
+          calls.push({ name: 'upsert_hypothesis', input: { id: x.id, counter_evidence_add: [t] } });
+          (self.notes.lessLikely = self.notes.lessLikely || []).push({ cause: x.cause, why: 'les trois courants sont équilibrés' });
+        });
+        if (!h || !isSurcharge(h)) h = overload[0];
+      }
     }
 
     // ouverture successive des départs (IT) : le départ en défaut est identifié ; les pistes liées aux départs sains sont écartées
@@ -536,13 +609,22 @@
     }
     if (!h) return { calls: calls };
 
+    const tplH = findTemplate(this, h);
+    const tctlH = tplH ? tplH.controls.find(function (c) { return DM.normalize(c.description) === DM.normalize(ctl.description); }) : null;
+    // contrôle à « signature » : une anomalie qui ne porte aucun des signes attendus ne désigne pas cette cause
+    if (r.verdict === 'non_conforme' && tctlH && tctlH.signe && !has(DM.normText(r.obtained), tctlH.signe)) {
+      calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'ecartee', counter_evidence_add: [fact + ' (anomalie sans rapport avec cette piste)'],
+        justification: 'Le résultat est anormal, mais ne désigne pas cette cause.' } });
+      this.notes.discarded = h.cause;
+      this.notes.unrelated = true;
+      return { calls: calls };
+    }
     if (r.verdict === 'non_conforme') {
       calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'suspectee', evidence_add: [fact + ' (non conforme)'] } });
       const nonConf = DM.controlsOf(d, h.id).filter(function (x) { return DM.hasResult(x) && x.verdict === 'non_conforme'; }).length +
         (ctl.hypothesisId === h.id ? 0 : 1);
       const tpl = findTemplate(this, h);
-      const done = DM.controlsOf(d, h.id).map(function (x) { return DM.normalize(x.description); });
-      const remaining = tpl ? tpl.controls.filter(function (c) { return done.indexOf(DM.normalize(c.description)) === -1; }).length : 0;
+      const remaining = remainingControls(d, tpl, ctl);
       calls.push({ name: 'set_diagnosis_status', input: { status: 'probable', summary: h.cause,
         missing: remaining ? ['Contrôle complémentaire pour confirmer « ' + h.cause + ' »'] : ['Confirmation de la cause « ' + h.cause + ' »'] } });
       // on ne propose de confirmer qu'une fois tous les contrôles prévus pour cette piste réalisés
@@ -557,6 +639,18 @@
         // contrôle de localisation : un résultat sain resserre la zone de recherche, il ne contredit pas la piste
         calls.push({ name: 'upsert_hypothesis', input: { id: h.id, evidence_add: [fact + ' → ' + tctl.onConform] } });
         this.notes.localized = tctl.onConform;
+        // dernier contrôle de la piste, et un contrôle précédent était non conforme : la piste peut être confirmée
+        const hadNc = DM.controlsOf(d, h.id).some(function (x) { return DM.hasResult(x) && x.verdict === 'non_conforme'; });
+        if (!remainingControls(d, tpl, ctl)) {
+          if (hadNc) {
+            // on ne propose de confirmer tout de suite que s'il ne reste aucune autre piste à contrôler (sinon, elles passent d'abord)
+            const othersPending = DM.pendingControls(d).some(function (c) { return c.id !== ctl.id && c.hypothesisId !== h.id; });
+            if (!othersPending) this.notes.toConfirm = h.id;
+          } else {
+            calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'ecartee', justification: 'Tous les contrôles de cette piste sont conformes.' } });
+            this.notes.discarded = h.cause;
+          }
+        }
       } else {
         const others = DM.controlsOf(d, h.id).filter(function (x) { return x.id !== ctl.id && !DM.hasResult(x); });
         const input = { id: h.id, counter_evidence_add: [fact + ' (conforme)'] };
@@ -566,6 +660,14 @@
     }
     return { calls: calls };
   };
+
+  /** Nombre de contrôles du gabarit qui restent à faire (un contrôle déjà réalisé pour une autre piste compte comme fait). */
+  function remainingControls(d, tpl, current) {
+    if (!tpl) return 0;
+    const done = d.controls.filter(function (x) { return DM.hasResult(x) || (current && x.id === current.id); })
+      .map(function (x) { return DM.normalize(x.description); });
+    return tpl.controls.filter(function (c) { return done.indexOf(DM.normalize(c.description)) === -1; }).length;
+  }
 
   /** Description de chaque départ citée par le technicien : « D3 pompe P2 variateur… » → {D3: 'pompe P2 variateur…'} */
   function feederSegments(text) {
@@ -612,13 +714,23 @@
   /* 4. Hypothèses depuis la base de pannes */
   LocalProvider.prototype.hypotheses = function (d) {
     if (this.notes.question || !d.description) return null;
-    const alive = d.hypotheses.filter(function (h) { return h.status !== 'ecartee'; });
+    // une piste que le technicien a refusé de confirmer ne bloque pas la recherche d'autres pistes
+    const alive = d.hypotheses.filter(function (h) { return h.status !== 'ecartee' && !DM.findFact(d, 'Confirmation de « ' + h.cause + ' »'); });
     if (alive.length) return null;
     const sug = DM.suggestHypotheses(d);
     const relevant = sug.filter(function (x) { return x.score > 0; });
     // 2 à 3 pistes : les pertinentes d'abord, complétées par les plus courantes pour ce type d'installation
     const pick = relevant.slice(0, 3);
-    sug.forEach(function (x) { if (pick.length < 2 && pick.indexOf(x) === -1) pick.push(x); });
+    // sans aucun indice au départ, on commence par les pannes les plus courantes du domaine ;
+    // une fois les pistes pertinentes épuisées, on ne déroule pas toute la base : on redemande des observations
+    if (!d.hypotheses.length) sug.forEach(function (x) { if (pick.length < 2 && pick.indexOf(x) === -1) pick.push(x); });
+    // un résultat anormal resté sans explication appelle les causes qui prévoient ce même contrôle
+    if (!pick.length) {
+      const abnormal = d.controls.filter(function (c) { return DM.hasResult(c) && c.verdict === 'non_conforme'; }).map(function (c) { return DM.normalize(c.description); });
+      sug.forEach(function (x) {
+        if (pick.length < 2 && x.template.controls.some(function (c) { return abnormal.indexOf(DM.normalize(c.description)) !== -1; })) pick.push(x);
+      });
+    }
     if (!pick.length) return null;
     const self = this;
     self.notes.templates = {};
@@ -641,10 +753,29 @@
     const calls = [];
     // contrôles déjà présents dans le diagnostic (toutes pistes) : jamais reproposés
     const existing = d.controls.map(function (c) { return DM.normalize(c.description); });
+    let alive = 0;
     d.hypotheses.forEach(function (h) {
-      if (h.status === 'ecartee' || DM.controlsOf(d, h.id).some(function (c) { return !DM.hasResult(c); })) return;
+      if (h.status === 'ecartee') return;
+      if (DM.controlsOf(d, h.id).some(function (c) { return !DM.hasResult(c); })) { alive++; return; }
       const tpl = findTemplate(self, h);
-      if (!tpl) return;
+      if (!tpl) { alive++; return; }
+      let dead = false;
+      // un contrôle du gabarit déjà réalisé pour une autre piste n'est pas redemandé : son résultat est repris ici
+      tpl.controls.forEach(function (tc) {
+        const done = d.controls.find(function (c) { return DM.hasResult(c) && c.hypothesisId !== h.id && DM.normalize(c.description) === DM.normalize(tc.description); });
+        if (!done || done.verdict === 'indetermine') return;
+        const tag = 'Contrôle « ' + shortLabel(done.description) + ' »';
+        if (h.evidence.concat(h.counterEvidence).some(function (e) { return e.text.indexOf(tag) === 0; })) return;
+        const fact = tag + ' : ' + done.obtained + ' (déjà réalisé)';
+        if (done.verdict === 'non_conforme') calls.push({ name: 'upsert_hypothesis', input: { id: h.id, evidence_add: [fact] } });
+        else if (tc.localize) calls.push({ name: 'upsert_hypothesis', input: { id: h.id, evidence_add: [fact + ' → ' + tc.onConform] } });
+        else if (!dead) {
+          calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'ecartee', counter_evidence_add: [fact], justification: 'Contrôle déjà réalisé, conforme : ' + done.obtained } });
+          dead = true;
+        }
+      });
+      if (dead) return;
+      alive++;
       const next = tpl.controls.find(function (c) { return existing.indexOf(DM.normalize(c.description)) === -1; });
       if (!next) return;
       existing.push(DM.normalize(next.description));
@@ -653,6 +784,8 @@
         why: next.why || 'Vérifier l’hypothèse « ' + h.cause + ' ».'
       } });
     });
+    // toutes les pistes viennent d'être écartées par des résultats déjà connus : on repart chercher d'autres pistes (sans boucler)
+    if (!alive && calls.length && d.description && !this.notes.toConfirm && !this.notes.confirmed && (this.notes.rounds = (this.notes.rounds || 0) + 1) <= 4) this.stage = 3;
     return { calls: calls };
   };
 
@@ -693,10 +826,22 @@
       parts.push('Résultat **non conforme** : la piste « ' + hs.cause + ' » devient **suspectée**. Un contrôle complémentaire va la confirmer ou l’écarter.');
     }
     // pistes affaiblies par le résultat de ce tour (annoncées une seule fois)
-    (notes.lessLikely || []).forEach(function (x) { parts.push('La piste « ' + x.cause + ' » devient peu probable : une surcharge mécanique chargerait les trois phases de la même façon.'); });
+    (notes.lessLikely || []).forEach(function (x) { parts.push('La piste « ' + x.cause + ' » devient peu probable : ' + x.why + '.'); });
+    // plus aucun contrôle à faire : une piste restée suspectée, dont tous les contrôles sont faits, est proposée à la confirmation
+    if (!notes.toConfirm && !notes.awaitVerdict && !notes.unitMismatch && !notes.question && !DM.nextControl(d)) {
+      const self = this;
+      const cand = d.hypotheses.find(function (x) {
+        return x.status === 'suspectee' && !DM.findFact(d, 'Confirmation de « ' + x.cause + ' »') &&
+          DM.controlsOf(d, x.id).some(function (c) { return DM.hasResult(c) && c.verdict === 'non_conforme'; }) &&
+          !remainingControls(d, findTemplate(self, x), null);
+      });
+      if (cand) { notes.toConfirm = cand.id; notes.lateConfirm = true; }
+    }
     if (notes.toConfirm) {
       const h = DM.findHyp(d, notes.toConfirm);
-      parts.push('Résultat **non conforme** : l’hypothèse « ' + h.cause + ' » devient **suspectée** (diagnostic probable).');
+      parts.push(notes.lateConfirm
+        ? 'Les autres pistes sont écartées : il reste « ' + h.cause + ' », appuyée par un contrôle non conforme (diagnostic probable).'
+        : 'Résultat **non conforme** : l’hypothèse « ' + h.cause + ' » devient **suspectée** (diagnostic probable).');
       // version courte pour le téléphone (le détail complet est dans le panneau et le rapport)
       if (h.evidence.length > 1) {
         parts.push('Éléments concordants :\n' + h.evidence.map(function (e) {
@@ -710,7 +855,8 @@
       ask.hypothesisId = h.id;
       return this.finish(parts, ask);
     }
-    if (notes.discarded) parts.push('Résultat conforme : je **écarte** la piste « ' + notes.discarded + ' ».');
+    if (notes.discarded && notes.unrelated) parts.push('Résultat anormal, mais qui ne désigne pas la cause « ' + notes.discarded + ' » : je l’**écarte** et je garde ce constat pour la suite.');
+    else if (notes.discarded) parts.push('Résultat conforme : je **écarte** la piste « ' + notes.discarded + ' ».');
     else if (notes.result && notes.result.verdict === 'conforme' && !notes.localized) parts.push('Résultat conforme, noté.');
     if (notes.notConfirmed) parts.push('D’accord, je ne confirme pas encore : poursuivons les contrôles.');
 
@@ -726,6 +872,7 @@
       const ms = DM.measurementsOf(d, ctl.id);
       if (notes.relinked === ctl.id) parts.push('Cette valeur ne correspond pas au contrôle demandé : je la rattache au contrôle « ' + ctl.description + ' ».');
       parts.push('📏 Noté : ' + (ms.length ? ms.map(DM.formatMeasurement).join(' ; ') : 'résultat reçu') + '.' +
+        (notes.seriesNote ? '\n' + notes.seriesNote : '') +
         (ctl.expected ? '\nRésultat attendu : ' + noDot(ctl.expected) + '.' : ''));
       return this.finish(parts, { question: 'Par rapport à l’attendu, ce résultat est-il conforme ?', choices: ['Conforme', 'Non conforme', 'Je ne sais pas'], kind: 'verdict', control_id: ctl.id });
     }
@@ -753,6 +900,9 @@
       const missing = ['Un contrôle permettant de départager les pistes restantes', 'Une nouvelle observation ou mesure du technicien'];
       calls.push({ name: 'set_diagnosis_status', input: { status: 'non_confirme', summary: 'Pistes de la base locale épuisées', missing: missing } });
       parts.push('Je ne peux pas conclure avec les contrôles réalisés : les pistes de ma base locale sont écartées. Il me manque une observation supplémentaire (bruit, odeur, code défaut, conditions d’apparition). Décris-moi ce que tu constates, ou reconnecte-toi pour que l’IA approfondisse.');
+      // la réponse est mémorisée comme observation : elle peut faire apparaître de nouvelles pistes
+      const n = d.facts.filter(function (f) { return /^Observation complémentaire/.test(f.question); }).length;
+      calls.push({ name: 'ask_user', input: { question: 'Observation complémentaire n°' + (n + 1) + ' : que constates-tu d’autre ?', choices: [], kind: 'open' } });
       return { calls: calls, text: parts.join('\n\n') };
     }
     if (!d.description) return this.finish(['Décris-moi la panne. Tu peux également ajouter une photo.'], null);

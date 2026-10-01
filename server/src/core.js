@@ -8,7 +8,10 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const FILES = [
-  'js/utils.js', 'js/safety.js', 'js/knowledge.js', 'js/model.js', 'js/report.js', 'js/kb.js',
+  'js/utils.js', 'js/safety.js', 'js/knowledge.js',
+  'js/pannes/electricite.js', 'js/pannes/electrotechnique.js', 'js/pannes/moteur.js', 'js/pannes/pompe.js', 'js/pannes/hvac.js',
+  'js/pannes/automatisme.js', 'js/pannes/acces.js', 'js/pannes/incendie.js', 'js/pannes/industriel.js',
+  'js/model.js', 'js/report.js', 'js/kb.js',
   'js/agent/tools.js', 'js/agent/engine.js', 'js/agent/local-provider.js'
 ];
 

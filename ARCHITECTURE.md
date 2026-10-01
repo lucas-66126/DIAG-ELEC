@@ -26,7 +26,7 @@
 │        │                                                                              │
 │  Client agent (js/agent/client.js) ── en ligne ──► POST /api/agent/turn               │
 │        │                          └─ hors ligne ──► Moteur local (même cœur)          │
-│  Cœur partagé : js/model.js · js/safety.js · js/knowledge.js · js/kb.js               │
+│  Cœur partagé : js/model.js · js/safety.js · js/knowledge.js · js/pannes/ · js/kb.js               │
 │                 js/agent/tools.js · js/agent/engine.js · js/agent/local-provider.js   │
 │  Stockage local : localStorage (données) · IndexedDB (photos) · file de synchro      │
 └───────────────────────────────────────────────────────────────────────────────────────┘

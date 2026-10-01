@@ -1,8 +1,10 @@
 /* DIAG-MAINT — service worker : réseau d'abord, cache en secours (fonctionnement hors-ligne).
  * Les appels d'API (/api/…) ne sont jamais mis en cache. */
-const CACHE = 'diagmaint-v2.0.0';
+const CACHE = 'diagmaint-v2.1.0';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/styles.css',
+  './js/pannes/electricite.js', './js/pannes/electrotechnique.js', './js/pannes/moteur.js', './js/pannes/pompe.js', './js/pannes/hvac.js',
+  './js/pannes/automatisme.js', './js/pannes/acces.js', './js/pannes/incendie.js', './js/pannes/industriel.js',
   './js/utils.js', './js/icons.js', './js/safety.js', './js/knowledge.js', './js/model.js', './js/report.js', './js/kb.js',
   './js/store.js', './js/photos.js', './js/sync.js', './js/ui.js', './js/app.js',
   './js/agent/tools.js', './js/agent/engine.js', './js/agent/local-provider.js', './js/agent/client.js',

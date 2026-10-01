@@ -313,9 +313,10 @@ test('scénario Mitsubishi complet avec une IA simulée (5 tours, jusqu’à la 
 test('moteur local (hors ligne) : scénario Mitsubishi jusqu’au diagnostic confirmé', async () => {
   let d = newDiag();
   const said = [];
-  // V2 : pas de confirmation sur une seule mesure ; le contrôle suivant de la piste est demandé d'abord
+  // V2 : pas de confirmation sur une seule mesure ; le contrôle suivant de la piste est demandé d'abord.
+  // V2.1 : « condenseur très encrassé » est compris comme une anomalie, sans redemander « conforme ou non ? »
   for (const msg of ['Ma clim Mitsubishi fait déclencher le C20 extérieur.', 'Environ cinq minutes.', 'Non.', 'Non', 'Référence MUZ-LN35VG',
-    '18,5 A', 'Non conforme', 'Condenseur très encrassé, ventilateur freiné', 'Non conforme', 'Oui, confirmer']) {
+    '18,5 A', 'Non conforme', 'Condenseur très encrassé, ventilateur freiné', 'Oui, confirmer']) {
     userSays(d, msg);
     const out = await DM.agent.runLocalTurn({ diag: d, services: { knowledge: kbService } });
     d = out.diag;
@@ -329,8 +330,9 @@ test('moteur local (hors ligne) : scénario Mitsubishi jusqu’au diagnostic con
   assert.match(said[6], /suspectée/);
   assert.match(said[6], /Contrôle n°2/, 'contrôle complémentaire avant toute confirmation');
   assert.doesNotMatch(said[6], /je la confirme/);
-  assert.match(said[8], /je la confirme/);
-  assert.match(said[9], /Diagnostic confirmé/);
+  assert.doesNotMatch(said[7], /ce résultat est-il conforme/, 'le constat « encrassé » n’exige pas de verdict supplémentaire');
+  assert.match(said[7], /je la confirme/);
+  assert.match(said[8], /Diagnostic confirmé/);
   assert.equal(d.verdict.status, 'confirme');
   assert.equal(d.brand, 'Mitsubishi');
   assert.equal(d.reference, 'MUZ-LN35VG');

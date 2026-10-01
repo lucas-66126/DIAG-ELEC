@@ -2,7 +2,7 @@
 (function (DM) {
   'use strict';
   const esc = DM.esc, icon = DM.icon;
-  DM.VERSION = '2.0.0';
+  DM.VERSION = '2.1.0';
   DM.views = DM.views || {};
 
   const ROUTES = [

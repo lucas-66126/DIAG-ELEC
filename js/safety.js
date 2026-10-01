@@ -45,7 +45,7 @@
     { k: ['rotation', 'courroie', 'accouplement', 'arbre', 'ventilateur', 'tourner', 'roue'], level: 'warning', t: 'Pièces en mouvement : consignation mécanique, attendre l’arrêt complet, pas de vêtements amples.' },
     { k: ['pneumat', 'verin', 'air comprime'], level: 'warning', t: 'Énergie pneumatique : isoler et purger le circuit, attention aux mouvements résiduels des vérins.' },
     { k: ['hydraul', 'accumulateur'], level: 'warning', t: 'Énergie hydraulique : isoler, décharger les accumulateurs, risque d’injection d’huile sous pression.' },
-    { k: ['batterie'], level: 'warning', t: 'Batteries : risque de court-circuit et d’arc, outils isolés, retirer les bijoux, attention à l’électrolyte.' },
+    { k: ['batterie'], not: ['hvac'], level: 'warning', t: 'Batteries : risque de court-circuit et d’arc, outils isolés, retirer les bijoux, attention à l’électrolyte.' },
     { k: ['400', 'tgbt', 'jeu de barres', 'hta'], level: 'danger', t: 'Énergie élevée (TGBT, 400 V, jeu de barres) : risque d’arc électrique, EPI arc flash adaptés.' },
     { k: ['hauteur', 'toiture', 'echelle', 'nacelle'], level: 'warning', t: 'Travail en hauteur : protection collective ou harnais, moyen d’accès adapté.' },
     { k: ['extinction', 'co2', 'gaz inerte', 'sprinkler'], level: 'danger', t: 'Extinction automatique : condamner le déclenchement (inhibition / position manuelle) avant tout essai.' },
@@ -104,6 +104,8 @@
     }
 
     EXTRA.forEach(function (x) {
+      // en climatisation, « batterie » désigne un échangeur, pas un accumulateur
+      if (x.not && x.not.indexOf(installationType) !== -1) return;
       if (x.k.some(function (k) { return DM.hasKeyword(text, k); })) {
         add(points, x.t);
         level = maxLevel(level, x.level);

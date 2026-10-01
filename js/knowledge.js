@@ -1,6 +1,9 @@
-/* DIAG-MAINT — base de connaissances : types d'installation, symptômes courants, hypothèses types.
- * Les mots-clés sont écrits en minuscules sans accents ; ils sont comparés au début des mots
- * de la description et des symptômes (ex. "disjonct" reconnaît "disjoncte", "disjoncteur"). */
+/* DIAG-MAINT — base de pannes : types d'installation, symptômes courants, outils communs.
+ * Les pannes elles-mêmes sont décrites par domaine dans js/pannes/*.js (un fichier par domaine).
+ *
+ * Mots-clés : écrits en minuscules sans accents, comparés au début des mots de la description,
+ * des symptômes et des réponses du technicien (« disjonct » reconnaît « disjoncte », « disjoncteur »).
+ * Un mot-clé précédé de « + » est un indice fort (il compte triple). */
 (function (DM) {
   'use strict';
 
@@ -36,12 +39,23 @@
   DM.symptomChips = function (type) { return (DM.SYMPTOM_CHIPS[type] || []).concat(COMMON_SYMPTOMS); };
 
   /**
-   * Contrôle type. opts.localize : contrôle de localisation — un résultat conforme ne contredit pas l'hypothèse,
+   * Contrôle type. Un résultat NON CONFORME appuie l'hypothèse ; le DERNIER contrôle d'une hypothèse est celui qui la confirme.
+   * opts.localize : contrôle de localisation — un résultat conforme ne contredit pas l'hypothèse,
    * il resserre la zone de recherche (opts.onConform décrit ce qu'on en déduit).
    */
   function C(type, description, expected, why, opts) {
     return Object.assign({ type: type, description: description, expected: expected, why: why || '' }, opts || {});
   }
+  /**
+   * Hypothèse type : UNE cause précise.
+   * advice : réparation conseillée une fois la cause confirmée.
+   * opts.diff : true si la cause fait déclencher un différentiel, false si elle ne le fait pas (sert à départager).
+   */
+  function H(cause, reason, keywords, controls, advice, opts) {
+    return Object.assign({ cause: cause, reason: reason, keywords: keywords, controls: controls, advice: advice || '' }, opts || {});
+  }
+
+  /* ---------- gabarits partagés entre domaines ---------- */
 
   /* Régime IT : méthode de recherche d'un défaut d'isolement signalé par le CPI. */
   const FEEDER_TEST = C('fonctionnel',
@@ -52,7 +66,7 @@
   function isolationFault() {
     return H('Défaut d’isolement sur un départ (humidité, condensation, infiltration)',
       'Un défaut d’isolement qui apparaît la nuit et le matin, s’aggrave après la pluie et disparaît quand il fait sec et chaud est typique d’une humidité ou d’une condensation dans une boîte de jonction, un câble ou un presse-étoupe. En IT, ce premier défaut doit être éliminé avant qu’un second défaut sur une autre phase ne provoque un court-circuit.',
-      ['cpi', 'controleur permanent', 'isolement', 'regime it', 'pre alarme', 'alarme', 'humid', 'pluie', 'matin', 'nuit', 'condensation', 'rosee', 'sec', 'intermitten', 'exterieur', 'fosse'],
+      ['+cpi', '+controleur permanent', '+regime it', 'isolement', 'pre alarme', 'alarme', 'humid', 'pluie', 'matin', 'nuit', 'condensation', 'rosee', 'sec', 'intermitten', 'exterieur', 'fosse'],
       [FEEDER_TEST,
        C('hors_tension', 'Départ en défaut consigné : mesurer l’isolement du récepteur seul (moteur, appareil), câble débranché, au mégohmmètre (tension d’essai adaptée).', 'Isolement élevé (> 1 MΩ, typiquement plusieurs centaines de MΩ pour un moteur sain).',
          'Séparer le récepteur du câble : savoir si le défaut est dans l’appareil ou dans la liaison.',
@@ -68,8 +82,6 @@
       'Départ consigné : sécher et nettoyer la boîte de jonction, remplacer les bornes oxydées, le joint et le presse-étoupe (indice IP adapté à l’extérieur), ' +
       'puis refaire la mesure d’isolement du câble — idéalement au moment où le défaut apparaissait (tôt le matin, après une nuit humide) — et suivre la valeur du CPI les jours suivants.');
   }
-  /** Hypothèse type. advice : réparation conseillée une fois la cause confirmée (facultatif). */
-  function H(cause, reason, keywords, controls, advice) { return { cause: cause, reason: reason, keywords: keywords, controls: controls, advice: advice || '' }; }
 
   /* Déclenchements thermiques d'un moteur : la mesure du courant sur CHAQUE phase en régime établi départage
    * une surcharge mécanique (3 phases chargées) d'un défaut électrique localisé (une phase plus chargée). */
@@ -87,280 +99,181 @@
        C('sous_tension', 'Mesurer en charge la chute de tension aux bornes de chaque pôle des contacteurs concernés (voltmètre, calibre adapté).', 'Quelques dizaines de mV, identique sur les trois pôles.',
          'Confirmer un pôle résistant avant de remplacer le contacteur.')],
       'Circuit consigné : remplacer le contacteur en cause (pas seulement le pôle), contrôler le serrage de ses connexions au couple, ' +
-      'puis refaire la mesure du courant par phase en charge et une thermographie après 40 minutes de marche. Ne pas augmenter le réglage du relais thermique pour « tenir ».');
+      'puis refaire la mesure du courant par phase en charge et une thermographie après 40 minutes de marche. Ne pas augmenter le réglage du relais thermique pour « tenir ».',
+      { diff: false });
+  }
+  function thermalSetting() {
+    return H('Réglage du relais thermique inadapté',
+      'Un réglage trop bas (ou qui ne tient pas compte du montage : In/√3 s’il est placé dans le triangle d’un étoile-triangle) provoque des déclenchements sans défaut réel.',
+      ['thermique', 'etoile', 'triangle', '+reglage', 'regle', 'relais', 'remplace', 'neuf'],
+      [C('visuel', 'Comparer le réglage du relais thermique au courant qu’il surveille (plaque moteur ; In/√3 ≈ 0,58 × In s’il est placé dans le triangle).', 'Réglage cohérent avec le courant surveillé, sans marge excessive ni insuffisante.',
+        'Écarter une cause simple, sans risque, avant de mesurer.')],
+      'Régler le relais thermique sur le courant nominal réellement surveillé (plaque moteur, montage), sans marge « de confort », puis contrôler le courant par phase en charge. ' +
+      'Un réglage ne se relève jamais pour faire tenir un moteur qui consomme trop.',
+      { diff: false });
+  }
+  /* Automatisme : l'étape active et la transition attendue désignent l'information manquante. */
+  const CYCLE_STEP = C('fonctionnel',
+    'Relever sur l’IHM ou la console de programmation l’étape active du cycle et la condition attendue pour passer à la suivante.',
+    'Aucune condition en attente (sinon : l’information attendue désigne le capteur ou l’actionneur à contrôler).',
+    'Savoir précisément ce que l’automate attend avant de démonter quoi que ce soit.',
+    { localize: true, onConform: 'Aucune condition bloquante relevée : contrôler directement les capteurs et actionneurs du mouvement arrêté.' });
+  /* Variateur : le code et l'historique orientent toute la suite. */
+  const DRIVE_CODE = C('visuel',
+    'Relever le code défaut affiché par le variateur et son historique (derniers défauts, heures), puis consulter la notice.',
+    'Aucun défaut actif ni mémorisé.',
+    'Le code oriente directement vers la famille de causes (thermique, surintensité, tension du bus, terre).',
+    { localize: true, onConform: 'Aucun défaut mémorisé : le variateur n’est pas à l’origine de l’arrêt, voir la commande.' });
+
+  /* Issue de secours verrouillée : commune au contrôle d'accès et à la sécurité incendie. */
+  function emergencyExitLock() {
+    return H('Verrouillage d’issue de secours non libéré par l’alarme (asservissement)', 'Une issue de secours verrouillée par ventouse doit se libérer à l’alarme incendie et au déclencheur vert. Si elle reste verrouillée, l’asservissement n’agit pas sur son alimentation : relais non raccordé, contact shunté, câblage modifié.',
+      ['+issue de secours', '+ne lache pas', 'reste verrouille', 'a l alarme', 'essai', 'ventouse', 'declencheur vert', 'boitier vert', 'evacuation', 'ne se libere pas'],
+      [C('fonctionnel', 'Exploitant prévenu : déclencher l’alarme (ou actionner le déclencheur vert) et mesurer la tension aux bornes du verrouillage de l’issue.', 'Tension nulle pendant l’alarme : l’issue est libérée.',
+         'Vérifier la fonction de sécurité elle-même.'),
+       C('hors_tension', 'Suivre l’alimentation du verrouillage : contact du relais d’asservissement du SSI et déclencheur vert doivent être en série, sans shunt.', 'Contact d’asservissement et déclencheur vert câblés en série sur l’alimentation du verrouillage.',
+         'Trouver pourquoi l’alarme ne coupe pas l’alimentation.')],
+      'Faire rétablir par l’installateur le câblage de l’asservissement (coupure de l’alimentation du verrouillage par le SSI et par le déclencheur vert, sécurité positive), puis faire un essai complet et l’inscrire au registre de sécurité. ' +
+      'En attendant, l’issue doit rester déverrouillée : une issue de secours ne reste jamais condamnée.');
   }
 
-  const KB = {
-    electricite: [
-      isolationFault(),
-      H('Courants de fuite capacitifs d’un variateur (filtre CEM)', 'Le filtre CEM d’un variateur (condensateurs vers la terre) crée des fuites capacitives qui abaissent la valeur lue par le CPI ; un variateur récent est souvent soupçonné.',
-        ['variateur', 'cem', 'filtre', 'recent', 'installe', 'cpi', 'isolement'],
-        [FEEDER_TEST,
-         C('visuel', 'Vérifier dans la notice du variateur si le filtre CEM doit être déconnecté en régime IT (cavalier / vis de mise à la terre du filtre).', 'Filtre CEM configuré pour un réseau IT.',
-           'En IT, un filtre CEM raccordé à la terre fausse la surveillance d’isolement.')]),
-      H('Défaut d’isolement de résistances chauffantes', 'Les résistances chauffantes (chauffage, antigel) sont une cause classique de défaut d’isolement, surtout après une période d’arrêt humide.',
-        ['chauffage', 'resistance', 'radiateur', 'antigel', 'isolement', 'cpi'],
-        [FEEDER_TEST,
-         C('hors_tension', 'Départ du chauffage consigné : mesurer l’isolement des résistances au mégohmmètre.', 'Isolement > 1 MΩ.',
-           'Écarter ou confirmer les résistances chauffantes.')]),
-      H('Surcharge du circuit', 'Un courant absorbé supérieur au calibre provoque le déclenchement thermique de la protection.',
-        ['disjonct', 'saute', 'declench', 'surcharge', 'chauffe', 'apres un moment'],
-        [C('sous_tension', 'Mesurer le courant absorbé sur le circuit à la pince ampèremétrique, en charge.', 'Courant inférieur au calibre du disjoncteur (In).')]),
-      H('Défaut d’isolement', 'Un courant de fuite vers la terre (humidité, câble ou récepteur endommagé) fait déclencher le différentiel.',
-        ['differentiel', 'disjonct', 'humid', 'eau', 'pluie', 'fuite', 'declench', 'terre'],
-        [C('hors_tension', 'Mesurer la résistance d’isolement (mégohmmètre 500 V DC) entre conducteurs actifs et PE, récepteurs débranchés.', '≥ 0,5 MΩ (NF C 15-100), idéalement > 1 MΩ.')]),
-      H('Court-circuit', 'Un déclenchement immédiat à la mise sous tension oriente vers un court-circuit franc.',
-        ['court', 'immediat', 'instantane', 'flash', 'etincel', 'arc', 'brul'],
-        [C('hors_tension', 'Mesurer la résistance entre phase et neutre et entre phases (ohmmètre), charges débranchées.', 'Résistance élevée (circuit ouvert), aucune valeur proche de 0 Ω.')]),
-      H('Connexion desserrée / échauffement', 'Un mauvais serrage crée une résistance de contact, un échauffement et des coupures aléatoires.',
-        ['chauffe', 'odeur', 'brul', 'noirci', 'intermittent', 'gresill', 'clignot', 'aleatoire'],
-        [C('visuel', 'Consigner puis inspecter bornes et connexions (traces d’échauffement, isolant fondu) et contrôler le serrage au couple.', 'Aucune trace d’échauffement, serrage conforme au couple constructeur.'),
-         C('sous_tension', 'Réaliser une thermographie infrarouge des connexions en charge.', 'Écart < 10 °C entre connexions comparables.')]),
-      H('Absence de tension en amont', 'L’équipement n’est peut-être simplement pas alimenté (protection amont ouverte, coupure réseau).',
-        ['plus de courant', 'pas de courant', 'pas de tension', 'aucun', 'eteint', 'coupure', 'ne fonctionne', 'hors service'],
-        [C('sous_tension', 'Mesurer la tension en amont et en aval de la protection (multimètre CAT III).', '230 V ph-N / 400 V ph-ph ±10 %.')]),
-      H('Appareil de protection défectueux', 'Une protection vieillissante peut déclencher sans défaut réel ou refuser de se réarmer.',
-        ['disjonct', 'rearm', 'bloque', 'differentiel', 'ne tient pas'],
-        [C('fonctionnel', 'Réarmer hors charge puis tester le bouton test du différentiel ; si possible, mesurer le seuil et le temps de déclenchement.', 'Réarmement possible ; déclenchement au bouton test ; seuil entre 0,5 et 1 × IΔn.')])
-    ],
-    electrotechnique: [
-      contactDegrade(),
-      H('Défaut du circuit de commande', 'Sans tension de commande (fusible, transformateur, alimentation), aucun organe ne peut être piloté.',
-        ['ne demarre', 'commande', 'voyant', 'rien ne se passe', 'pas de reaction', 'aucune reaction', 'eteint'],
-        [C('sous_tension', 'Mesurer la tension au secondaire du transformateur de commande et en aval des fusibles de commande.', 'Tension nominale (ex. 24 V AC/DC ou 230 V AC).')]),
-      H('Contacteur défaillant (bobine ou contacts)', 'Une bobine coupée ou des contacts usés/soudés empêchent la mise en marche ou l’arrêt.',
-        ['contacteur', 'colle', 'claque', 'vibre', 'bruit', 'ne demarre', 'ne s arrete'],
-        [C('hors_tension', 'Mesurer la résistance de la bobine du contacteur.', 'Valeur conforme au constructeur (ni 0 Ω, ni circuit ouvert).'),
-         C('visuel', 'Contrôler l’état des contacts de puissance (usure, cratères, soudure).', 'Contacts propres, sans soudure.')]),
-      H('Relais thermique déclenché', 'Le relais de protection moteur a pu déclencher suite à une surcharge ou être mal réglé.',
-        ['thermique', 'declench', 'surcharge', 's arrete', 'chauffe', 'defaut'],
-        [C('visuel', 'Vérifier l’état du relais thermique et comparer son réglage au courant nominal de la plaque moteur.', 'Relais armé ; réglage = In moteur.')]),
-      H('Chaîne de sécurité ouverte', 'Un arrêt d’urgence, une fin de course ou un contact de porte ouvert interrompt la commande.',
-        ['arret d urgence', 'securite', 'ne demarre', 'defaut', 'porte', 'fin de course'],
-        [C('hors_tension', 'Contrôler la continuité de la chaîne de sécurité (AU, fins de course, contacts de porte, relais de sécurité).', 'Continuité sur toute la chaîne.')]),
-      H('Défaut de câblage / bornier', 'Un défaut intermittent évoque un conducteur desserré ou endommagé.',
-        ['intermittent', 'aleatoire', 'parfois', 'vibration', 'de temps en temps'],
-        [C('hors_tension', 'Contrôler le serrage des borniers et la continuité des conducteurs de commande en les sollicitant.', 'Serrage correct, continuité stable.')])
-    ],
-    hvac: [
-      H('Surintensité : consommation excessive de l’unité extérieure', 'Un déclenchement de la protection magnétothermique seule (sans le différentiel) après quelques minutes de fonctionnement oriente vers une intensité absorbée trop élevée (compresseur en difficulté, haute pression, ventilateur).',
-        ['disjonct', 'declench', 'saute', 'surintensit', 'minutes', 'apres quelques', 'c16', 'c20', 'c25', 'c32', 'protection'],
-        [C('sous_tension', 'Mesurer l’intensité absorbée par l’unité extérieure pendant son fonctionnement (pince ampèremétrique sur la phase d’alimentation).', 'Inférieure ou égale à l’intensité maximale indiquée sur la plaque signalétique / la notice.'),
-         C('visuel', 'Unité consignée : contrôler la propreté du condenseur et la rotation libre du ventilateur extérieur.', 'Batterie propre, ventilateur libre.')]),
-      H('Manque de fluide frigorigène (fuite)', 'Une charge insuffisante réduit la puissance frigorifique et provoque givrage / basse pression.',
-        ['ne refroidit', 'froid insuffisant', 'pas de froid', 'givre', 'glace', 'fuite', 'bulle', 'basse pression', 'bp', 'ne chauffe'],
-        [C('fluide', 'Relever les pressions HP/BP au manifold, calculer surchauffe et sous-refroidissement.', 'Valeurs conformes au constructeur (surchauffe typique 5 à 8 K).'),
-         C('fluide', 'Rechercher une fuite (détecteur électronique, bulles, traces d’huile aux raccords).', 'Aucune fuite détectée.')]),
-      H('Filtres ou échangeurs encrassés', 'L’encrassement réduit le débit d’air et l’échange thermique (givrage, haute pression).',
-        ['debit', 'faible', 'souffle', 'sale', 'poussiere', 'odeur', 'givre', 'encrass', 'haute pression', 'hp'],
-        [C('visuel', 'Contrôler l’état des filtres et des batteries (évaporateur / condenseur).', 'Filtres propres, ailettes dégagées.')]),
-      H('Condensateur de démarrage / permanent défaillant', 'Un condensateur hors tolérance empêche le démarrage du compresseur ou du ventilateur.',
-        ['ne demarre', 'compresseur', 'ventilateur', 'bourdonne', 'ronfle', 'claque', 'demarre pas'],
-        [C('hors_tension', 'Décharger puis mesurer la capacité du condensateur (capacimètre).', 'Capacité dans la tolérance (±5 à 10 % de la valeur marquée).')]),
-      H('Défaut de sonde ou de régulation', 'Une sonde dérivée ou coupée fausse la régulation ou provoque un code défaut.',
-        ['temperature', 'consigne', 'affiche', 'code', 'erreur', 'defaut', 'sonde', 'regul', 'e1', 'e2'],
-        [C('hors_tension', 'Déconnecter la sonde et mesurer sa résistance ; comparer à la table R/T constructeur (ex. CTN 10 kΩ à 25 °C).', 'Valeur conforme à la table R/T à la température mesurée.')]),
-      H('Moto-ventilateur défectueux', 'Un ventilateur à l’arrêt ou lent provoque haute pression (condenseur) ou givrage (évaporateur).',
-        ['ventilateur', 'bruit', 'vibration', 'ne tourne', 'chauffe', 'haute pression', 'hp'],
-        [C('sous_tension', 'Vérifier la rotation du ventilateur et mesurer son intensité absorbée.', 'Rotation libre, intensité ≤ valeur plaque.')]),
-      H('Évacuation des condensats obstruée', 'Un bac ou une évacuation bouchée provoque un débordement d’eau.',
-        ['fuite', 'eau', 'goutte', 'condensat', 'coule', 'deborde'],
-        [C('visuel', 'Contrôler le bac, la pompe de relevage et la pente de l’évacuation des condensats.', 'Écoulement libre, pompe fonctionnelle.')]),
-      H('Compresseur en défaut (protection thermique / bobinage)', 'Des arrêts répétés ou un compresseur qui ne démarre pas peuvent venir de ses enroulements.',
-        ['compresseur', 's arrete', 'coupe', 'chauffe', 'intermittent', 'disjonct'],
-        [C('hors_tension', 'Mesurer les résistances des enroulements (C-S, C-R, S-R) et l’isolement à la masse.', 'R(S-R) = R(C-S) + R(C-R) ; isolement > 1 MΩ.')])
-    ],
-    automatisme: [
-      H('Entrée automate non vue', 'Si l’API ne voit pas l’information, le cycle reste en attente.',
-        ['capteur', 'detecteur', 'entree', 'led', 'ne detecte', 'cycle bloque', 'attente', 'bloque'],
-        [C('sous_tension', 'Observer la LED d’entrée de l’API et mesurer la tension à la borne d’entrée en actionnant le capteur.', 'Changement d’état 0 V ↔ 24 V DC et LED correspondante.')]),
-      H('Capteur déréglé ou défectueux', 'Un capteur mal positionné, sale ou en fin de vie donne une détection instable.',
-        ['capteur', 'detecteur', 'intermittent', 'parfois', 'cellule', 'fin de course', 'aleatoire'],
-        [C('fonctionnel', 'Contrôler la détection du capteur (distance, alignement, propreté, LED du capteur).', 'Détection franche et répétable.')]),
-      H('Défaut d’alimentation 24 V', 'Une alimentation faible ou surchargée provoque des redémarrages et défauts aléatoires.',
-        ['24', 'alimentation', 'api', 'automate', 'eteint', 'reset', 'redemarre', 'stop'],
-        [C('sous_tension', 'Mesurer la tension 24 V DC en sortie d’alimentation, à vide puis en charge.', '24 V DC ±5 %, stable en charge.')]),
-      H('Sortie automate ou actionneur défaillant', 'La sortie peut être active sans que l’actionneur ne réagisse (bobine, câblage, distributeur).',
-        ['sortie', 'verin', 'electrovanne', 'actionneur', 'ne bouge', 'distributeur'],
-        [C('sous_tension', 'Activer/observer la sortie API et mesurer la tension aux bornes de l’actionneur.', '24 V présents lorsque la sortie est active.')]),
-      H('Défaut de communication réseau', 'Une perte de liaison bloque les échanges entre API, IHM, variateurs ou E/S déportées.',
-        ['communication', 'reseau', 'bus', 'profinet', 'modbus', 'ethernet', 'hmi', 'ihm', 'timeout', 'perte'],
-        [C('visuel', 'Contrôler câbles et connecteurs réseau, LED de diagnostic, adresses et diagnostic API.', 'Liaison établie, aucune erreur bus.')]),
-      H('Programme ou paramètre modifié', 'Une modification récente peut avoir introduit un comportement anormal.',
-        ['depuis la mise a jour', 'modif', 'mise a jour', 'parametre', 'recette', 'apres intervention', 'apres l intervention'],
-        [C('fonctionnel', 'Comparer le programme et les paramètres avec la dernière sauvegarde de référence.', 'Aucune différence non documentée.')])
-    ],
-    moteur: [
-      contactDegrade(),
-      H('Réglage du relais thermique inadapté', 'Un réglage trop bas (ou qui ne tient pas compte du montage : In/√3 s’il est placé dans le triangle d’un étoile-triangle) provoque des déclenchements sans défaut réel.',
-        ['thermique', 'etoile', 'triangle', 'reglage', 'regle', 'relais'],
-        [C('visuel', 'Comparer le réglage du relais thermique au courant qu’il surveille (plaque moteur ; In/√3 ≈ 0,58 × In s’il est placé dans le triangle).', 'Réglage cohérent avec le courant surveillé, sans marge excessive ni insuffisante.',
-          'Écarter une cause simple, sans risque, avant de mesurer.')]),
-      H('Échauffement de l’armoire (température ambiante)', 'Le relais thermique est sensible à la température de l’armoire : par forte chaleur il déclenche plus tôt, surtout si le moteur est déjà proche de sa limite.',
-        ['apres midi', 'chaleur', 'ete', 'temperature', 'atelier', 'ventilation'],
-        [C('fluide', 'Mesurer la température intérieure de l’armoire l’après-midi et contrôler sa ventilation (filtres, ventilateur).', 'Température compatible avec la notice du relais (souvent ≤ 40 °C), ventilation fonctionnelle.',
-          'Vérifier si la chaleur aggrave un défaut existant.')]),
-      H('Défaut d’alimentation (perte de phase)', 'Une phase manquante fait bourdonner le moteur sans démarrer et provoque un échauffement.',
-        ['ne demarre', 'bourdonne', 'ronfle', 'chauffe', 'phase', 'lent', 'disjonct'],
-        [C('sous_tension', 'Mesurer les tensions entre phases aux bornes du moteur.', 'Trois tensions présentes et équilibrées (écart < 2 %).')]),
-      H('Défaut d’isolement du bobinage', 'Un bobinage humide ou dégradé provoque des déclenchements différentiels.',
-        ['disjonct', 'differentiel', 'humid', 'odeur', 'brul', 'declench', 'eau'],
-        [C('hors_tension', 'Moteur déconnecté, mesurer l’isolement des enroulements par rapport à la masse (mégohmmètre 500 V DC).', '> 1 MΩ (> 100 MΩ pour un moteur sain).')]),
-      H('Enroulement coupé ou déséquilibré', 'Un enroulement défectueux crée un déséquilibre, un échauffement et des déclenchements thermiques.',
-        ['chauffe', 'bourdonne', 'ne demarre', 'thermique', 'declench'],
-        [C('hors_tension', 'Mesurer la résistance de chaque enroulement (U1-U2, V1-V2, W1-W2).', 'Valeurs identiques à ±5 %.')]),
-      H('Roulements usés', 'Bruit, vibration et échauffement côté paliers sont typiques d’une usure de roulements.',
-        ['bruit', 'vibration', 'chauffe', 'grince', 'siffle', 'claque', 'roulement'],
-        [C('visuel', 'Moteur consigné : tourner l’arbre à la main, contrôler jeu et bruit ; mesure vibratoire si disponible.', 'Rotation libre, sans point dur ni jeu.')]),
-      H('Surcharge mécanique', 'Une charge entraînée trop importante ou grippée (bande trop tendue, roulement, réducteur) fait déclencher le relais thermique.',
-        ['thermique', 'declench', 's arrete', 'chauffe', 'force', 'lent', 'bloque', 'bande', 'retendu', 'roulement', 'reducteur'],
-        [PHASE_CURRENTS,
-         C('visuel', 'Machine consignée : tourner l’arbre à la main, contrôler roulements, tension de bande et réducteur.', 'Rotation libre, sans point dur.',
-           'Rechercher une résistance mécanique anormale.')]),
-      H('Couplage incorrect', 'Après un remplacement, un mauvais couplage étoile/triangle donne un moteur lent ou qui chauffe.',
-        ['apres remplacement', 'neuf', 'inverse', 'sens', 'couplage', 'lent', 'remplace'],
-        [C('hors_tension', 'Vérifier le couplage (étoile/triangle) par rapport à la tension réseau et à la plaque.', 'Couplage conforme à la plaque.')]),
-      H('Variateur en défaut', 'Le variateur peut bloquer le moteur et afficher un code défaut.',
-        ['variateur', 'code', 'defaut', 'erreur', 'affiche', 'vitesse'],
-        [C('visuel', 'Relever le code défaut et l’historique du variateur ; consulter la notice.', 'Aucun défaut actif, ou défaut identifié.')])
-    ],
-    pompe: [
-      H('Désamorçage / prise d’air à l’aspiration', 'Une entrée d’air ou un niveau trop bas fait chuter le débit.',
-        ['pas de debit', 'debit faible', 'desamorc', 'air', 'bruit', 'aspiration'],
-        [C('visuel', 'Contrôler le niveau d’aspiration, le clapet de pied et l’étanchéité de l’aspiration.', 'Pompe amorcée, aspiration étanche.')]),
-      H('Crépine ou filtre colmaté', 'Un colmatage à l’aspiration limite le débit et peut provoquer la cavitation.',
-        ['debit', 'faible', 'pression basse', 'bouche', 'colmat'],
-        [C('visuel', 'Consigner la pompe, isoler hydrauliquement, inspecter et nettoyer crépine et filtre.', 'Crépine et filtre propres.')]),
-      H('Cavitation', 'Un bruit de « gravier » et des vibrations indiquent une pression d’aspiration insuffisante.',
-        ['bruit', 'gravier', 'vibration', 'cavitation', 'crepit'],
-        [C('fluide', 'Mesurer la pression à l’aspiration et comparer NPSH disponible / requis.', 'NPSH disponible > NPSH requis + marge.')]),
-      H('Garniture mécanique usée', 'Une fuite au niveau de l’arbre indique une garniture ou une tresse usée.',
-        ['fuite', 'goutte', 'eau', 'garniture', 'etancheite', 'arbre'],
-        [C('visuel', 'Inspecter la garniture mécanique ou la tresse (fuite le long de l’arbre).', 'Pas de fuite (ou fuite admise pour une tresse).')]),
-      H('Roue usée ou obstruée', 'Une roue usée ou encombrée ne fournit plus la hauteur manométrique nominale.',
-        ['debit', 'faible', 'pression', 'hauteur', 'usure', 'vibration'],
-        [C('fluide', 'Relever pression au refoulement et débit ; comparer à la courbe constructeur.', 'Point de fonctionnement sur la courbe.')]),
-      H('Sens de rotation inversé', 'Après intervention électrique, une inversion de phases fait tourner la pompe à l’envers.',
-        ['apres intervention', 'sens', 'debit faible', 'neuf', 'inverse', 'remplace'],
-        [C('fonctionnel', 'Vérifier le sens de rotation (flèche sur le corps de pompe) par une brève impulsion.', 'Rotation dans le sens de la flèche.')]),
-      H('Défaut de commande (pressostat / flotteur / niveau)', 'Une commande défaillante provoque marche continue, courts cycles ou absence de démarrage.',
-        ['ne demarre', 'ne s arrete', 'continu', 'court cycle', 'pressostat', 'flotteur', 'niveau'],
-        [C('fonctionnel', 'Contrôler le fonctionnement du pressostat / flotteur / capteur de niveau aux seuils réglés.', 'Changement d’état aux seuils réglés.')])
-    ],
-    acces: [
-      H('Défaut d’alimentation ou batterie', 'Un lecteur éteint ou une centrale muette évoquent un problème d’alimentation.',
-        ['rien', 'eteint', 'ne fonctionne', 'coupure', 'batterie', 'led', 'hors service'],
-        [C('sous_tension', 'Mesurer la tension d’alimentation de la centrale / du lecteur (12 ou 24 V DC) et la tension batterie.', 'Tension nominale ; batterie 12 V > 12,4 V.')]),
-      H('Gâche ou ventouse défectueuse', 'L’organe de verrouillage peut ne plus recevoir ou ne plus exécuter l’ordre.',
-        ['porte', 'ne s ouvre', 'ne se ferme', 'reste', 'gache', 'ventouse', 'verrouill'],
-        [C('sous_tension', 'Mesurer la tension aux bornes de la gâche / ventouse lors d’un accès autorisé.', 'Commande présente au moment de l’accès.'),
-         C('hors_tension', 'Mesurer la résistance de la bobine de la gâche / ventouse.', 'Valeur conforme (ni 0 Ω, ni circuit ouvert).')]),
-      H('Lecteur ou badge défectueux', 'Un seul badge refusé oriente vers le badge ; tous refusés vers le lecteur.',
-        ['badge', 'lecteur', 'refuse', 'carte', 'bip', 'ne lit'],
-        [C('fonctionnel', 'Tester avec un badge de référence valide et consulter le journal d’événements.', 'Lecture OK et événement enregistré.')]),
-      H('Droits ou paramétrage incorrects', 'Un refus ciblé (personne, horaire, porte) évoque un paramétrage logiciel.',
-        ['refuse', 'acces refuse', 'horaire', 'droit', 'certain', 'utilisateur'],
-        [C('fonctionnel', 'Vérifier les droits, plages horaires et la validité du badge dans le logiciel.', 'Droits conformes à la demande.')]),
-      H('Perte de communication avec la centrale', 'Un équipement hors ligne ne reçoit plus les droits ni ne remonte les événements.',
-        ['hors ligne', 'communication', 'reseau', 'bus', 'offline', 'rs485'],
-        [C('visuel', 'Contrôler le bus (RS485 / Ethernet), la terminaison, l’adressage et les LED de communication.', 'Équipement en ligne.')]),
-      H('Contact de porte ou bouton de sortie défaillant', 'Des alarmes « porte forcée / ouverte » viennent souvent du contact de position.',
-        ['alarme', 'porte forcee', 'porte ouverte', 'bouton', 'sortie'],
-        [C('fonctionnel', 'Contrôler le changement d’état du contact de position de porte et du bouton de sortie.', 'Changement d’état franc à chaque manœuvre.')])
-    ],
-    incendie: [
-      H('Câble de boucle endommagé ou agressé (défaut terre / court-circuit intermittent)',
-        'Un défaut terre fugitif, des courts-circuits ou des pertes de points qui reviennent seuls orientent vers un câble blessé ou qui bouge. ' +
-        'Des défauts qui apparaissent à heure fixe (démarrage d’un équipement voisin : CTA, moteur) ou après des travaux signent une agression mécanique du câble (vis, collier, vibration).',
-        ['defaut terre', 'boucle', 'court circuit', 'boucle ouverte', 'isolateur', 'travaux', 'faux plafond', 'intermitten', 'derangement',
-          'disparaissent', 'perte des points', 'reviennent', 'cta', 'vibr', 'luminaire'],
-        [C('fonctionnel', 'Exploiter l’historique de l’ECS : types de dérangement, nombre, horaires, points et isolateurs concernés.',
-            'Défauts sans lien avec un horaire ni une zone (sinon : chercher ce qui se passe à ces heures-là, dans cette zone).',
-            'Relier les défauts à un moment ou à un équipement avant toute mesure.',
-            { localize: true, onConform: 'Pas de corrélation visible : poursuivre par les mesures.' }),
-         C('visuel', 'Relever les isolateurs de court-circuit qui s’ouvrent lors du défaut, pour délimiter le tronçon en cause.',
-            'Aucun isolateur ouvert (sinon : le défaut est entre les isolateurs qui s’ouvrent).',
-            'Réduire la zone de recherche à quelques points.',
-            { localize: true, onConform: 'Aucun isolateur ne s’ouvre : pas de court-circuit franc au moment du relevé.' }),
-         C('hors_tension', 'Boucle déconnectée de l’ECS (mise hors service signalée à l’exploitant) : mesurer la résistance de boucle (A+ à B+, A− à B−) et la comparer à la notice.',
-            'Valeur conforme à la notice (continuité correcte).',
-            'Écarter une coupure franche ou une mauvaise connexion.',
-            { localize: true, onConform: 'Continuité correcte : pas de coupure franche, le défaut est un défaut d’isolement ou intermittent.' }),
-         C('hors_tension', 'Boucle déconnectée, points retirés : mesurer l’isolement de chaque conducteur par rapport à la terre au mégohmmètre 500 V.',
-            'Chaque conducteur > 1 MΩ, valeur stable.',
-            'Confirmer le défaut d’isolement et le conducteur touché.'),
-         C('hors_tension', 'Mesurer l’isolement tronçon par tronçon, en ouvrant la boucle aux isolateurs ou aux boîtes de dérivation.',
-            'Tous les tronçons > 1 MΩ (sinon : le tronçon en défaut est identifié).',
-            'Trouver le tronçon précis avant d’ouvrir les faux plafonds.',
-            { localize: true, onConform: 'Tous les tronçons sont sains : défaut dans un socle ou un point.' }),
-         C('visuel', 'Inspecter le cheminement du câble sur le tronçon en défaut : faux plafonds, fixations, passages près d’équipements qui vibrent ou de travaux récents.',
-            'Câble intact, fixé sur un support indépendant, éloigné des sources de vibration.',
-            'Constater la cause physique avant de réparer.')],
-        'Mise hors service de la boucle signalée à l’exploitant (mesures compensatoires, surveillance renforcée) : remplacer le tronçon de câble blessé (même type de câble, jonctions conformes au SSI), ' +
-        'le reposer sur un support indépendant, à l’écart des fixations de luminaires et des gaines qui vibrent ; refaire résistance de boucle et isolement, vérifier l’absence de défaut au démarrage ' +
-        'de l’équipement voisin, consigner l’intervention dans le registre de sécurité et informer l’entreprise qui a réalisé les travaux.'),
-      H('Défaut logiciel de l’ECS après mise à jour', 'Une mise à jour peut modifier le traitement des défauts ; elle est souvent soupçonnée, mais seule la chronologie permet de la retenir.',
-        ['mise a jour', 'logiciel', 'firmware', 'version'],
-        [C('fonctionnel', 'Comparer la date de la mise à jour avec celle des premiers défauts (historique de l’ECS) et demander à l’installateur les notes de version.',
-            'Défauts apparus bien après la mise à jour, ou sans rapport avec elle : la mise à jour n’est pas en cause (conforme).',
-            'Retenir ou écarter une cause soupçonnée sans preuve.')]),
-      H('Détecteur encrassé ou défectueux', 'Les alarmes intempestives proviennent souvent d’un détecteur sale ou en fin de vie.',
-        ['detecteur', 'feu', 'alarme', 'intempestif', 'derangement', 'poussiere'],
-        [C('fonctionnel', 'Identifier le point en alarme/dérangement ; nettoyer et tester le détecteur (aérosol de test).', 'Réaction à l’essai et retour au repos après réarmement.')]),
-      H('Ligne de détection en défaut (coupure / court-circuit)', 'Un dérangement de zone évoque une ligne coupée, en court-circuit ou une RFL absente.',
-        ['derangement', 'ligne', 'boucle', 'zone', 'court', 'coupure', 'defaut'],
-        [C('hors_tension', 'Déconnecter la ligne et mesurer sa résistance avec la résistance de fin de ligne.', 'Valeur égale à la RFL (ex. 4,7 kΩ) aux tolérances près.')]),
-      H('Défaut d’alimentation / batteries', 'Un défaut secteur ou batterie est signalé par l’ECS ou l’AES.',
-        ['batterie', 'secteur', 'alimentation', 'aes', 'defaut alim'],
-        [C('sous_tension', 'Mesurer la tension secteur, la tension de charge et la tension des batteries de l’AES.', 'Charge ≈ 27,3 V pour un système 24 V ; batteries de moins de 4 ans.')]),
-      H('Déclencheur manuel défectueux ou actionné', 'Un DM actionné ou endommagé maintient une alarme.',
-        ['declencheur', 'dm', 'bris de glace', 'alarme'],
-        [C('visuel', 'Contrôler l’état et la position du déclencheur manuel (membrane, réarmement).', 'DM au repos, membrane intacte.')]),
-      H('Défaut de DAS / asservissement', 'Un DAS qui ne revient pas en position ou n’envoie pas sa fin de course crée un défaut.',
-        ['porte coupe feu', 'clapet', 'volet', 'desenfumage', 'das', 'ventouse', 'asservissement'],
-        [C('fonctionnel', 'Contrôler position, fin de course et commande du DAS (en accord avec l’exploitant).', 'DAS en sécurité à l’ordre, retour de position correct.')]),
-      H('Défaut d’isolement de ligne (défaut terre)', 'Un défaut terre signalé par l’ECS vient d’une ligne humide ou blessée.',
-        ['defaut terre', 'terre', 'isolement', 'humid'],
-        [C('hors_tension', 'Mesurer l’isolement de la ligne par rapport à la terre.', '> 1 MΩ.')])
-    ],
-    industriel: [
-      H('Usure ou défaut mécanique', 'Bruits, jeux et vibrations orientent vers une pièce mécanique usée.',
-        ['bruit', 'vibration', 'jeu', 'claque', 'grince', 'usure', 'casse'],
-        [C('visuel', 'Machine consignée : contrôler jeux, roulements, courroies et accouplements.', 'Aucun jeu anormal, éléments en bon état.')]),
-      H('Défaut de lubrification', 'Un manque de lubrification provoque échauffement, grincement et usure prématurée.',
-        ['chauffe', 'grince', 'bruit', 'graiss', 'huile', 'lubrif'],
-        [C('visuel', 'Contrôler niveaux et circuits de lubrification.', 'Niveaux et graissage conformes au plan de maintenance.')]),
-      H('Pression pneumatique insuffisante', 'Des vérins lents ou sans force indiquent un manque de pression ou une fuite d’air.',
-        ['pneumatique', 'verin', 'air', 'pression', 'lent', 'force', 'fuite'],
-        [C('fluide', 'Relever la pression réseau et au point d’utilisation ; rechercher les fuites.', 'Pression ≥ valeur requise (ex. 6 bar), aucune fuite.')]),
-      H('Défaut hydraulique', 'Mouvements lents, échauffement ou fuite d’huile orientent vers le circuit hydraulique.',
-        ['hydraulique', 'huile', 'pression', 'fuite', 'lent', 'verin', 'chauffe'],
-        [C('fluide', 'Relever pression, niveau et température d’huile ; contrôler l’état des filtres.', 'Valeurs conformes au schéma hydraulique.')]),
-      H('Dispositif de sécurité machine actif', 'Une sécurité ouverte (carter, barrage, porte) empêche le démarrage.',
-        ['securite', 'capteur', 'carter', 'porte', 'barriere', 'ne demarre', 'bloque'],
-        [C('fonctionnel', 'Vérifier l’état des dispositifs de sécurité (barrages, interrupteurs de porte, relais de sécurité).', 'Sécurités fermées, relais de sécurité OK (LED).')])
-    ],
-    generic: [
-      H('Absence d’alimentation de l’équipement', 'Avant toute recherche approfondie, vérifier que l’équipement est bien alimenté.',
-        ['ne demarre', 'ne fonctionne', 'eteint', 'rien', 'hors service', 'pas de courant', 'aucun'],
-        [C('sous_tension', 'Mesurer la tension d’alimentation au plus près de l’équipement.', 'Tension nominale présente.')]),
-      H('Conséquence d’une intervention récente', 'Une panne apparue juste après une intervention est souvent liée à celle-ci.',
-        ['depuis l intervention', 'depuis le remplacement', 'depuis les travaux', 'apres intervention', 'apres l intervention', 'apres remplacement', 'apres les travaux', 'intervention', 'remplace', 'modif', 'travaux'],
-        [C('visuel', 'Recenser les interventions récentes (carnet, collègues) et vérifier ce qui a été modifié.', 'Aucune modification non documentée.')]),
-      H('Conditions environnementales', 'Humidité, chaleur, poussière ou orage peuvent déclencher des défauts.',
-        ['humid', 'eau', 'chaleur', 'orage', 'poussiere', 'gel', 'pluie', 'foudre'],
-        [C('visuel', 'Inspecter l’environnement de l’équipement (infiltrations, ventilation, propreté, traces de surtension).', 'Environnement conforme aux conditions d’utilisation.')])
-    ]
-  };
-  Object.keys(KB).forEach(function (type) {
-    KB[type].forEach(function (t, i) { t.id = type + ':' + i; });
-  });
+  DM.kbTools = { C: C, H: H, emergencyExitLock: emergencyExitLock, FEEDER_TEST: FEEDER_TEST, isolationFault: isolationFault, PHASE_CURRENTS: PHASE_CURRENTS,
+    contactDegrade: contactDegrade, thermalSetting: thermalSetting, CYCLE_STEP: CYCLE_STEP, DRIVE_CODE: DRIVE_CODE };
+
+  /* ---------- registre ---------- */
+  const KB = {};
   DM.KB = KB;
+  /** Ajoute des hypothèses types à un domaine (appelé par js/pannes/*.js). */
+  DM.kbRegister = function (type, list) {
+    KB[type] = (KB[type] || []).concat(list);
+    KB[type].forEach(function (t, i) {
+      t.id = type + ':' + i;
+      if (!t.requis) {
+        const n = DM.normalize(t.cause);
+        const key = Object.keys(REQUIS).find(function (k) { return n.indexOf(k) === 0; });
+        if (key) t.requis = REQUIS[key];
+      }
+    });
+  };
+  /* Pannes propres à un matériel : elles ne sont proposées que si ce matériel est cité
+   * (inutile de parler de vase d'expansion pour un split, ou d'issue de secours pour un volet de désenfumage). */
+  const REQUIS = {
+    'defaut d’isolement sur un depart': ['cpi', 'controleur permanent', 'regime it', 'neutre isole'],
+    'courants de fuite capacitifs': ['cpi', 'controleur permanent', 'regime it', 'neutre isole'],
+    'defaut d’isolement de resistances chauffantes': ['cpi', 'controleur permanent', 'regime it', 'neutre isole'],
+    'verrouillage d’issue de secours': ['issue'],
+    'photocellules de securite': ['portail', 'barriere', 'portillon motorise'],
+    'portail qui force': ['portail', 'barriere'],
+    'fin de course ou butee de portail': ['portail', 'barriere'],
+    'ordre d’ouverture intempestif': ['portail', 'barriere', 'porte'],
+    'degivrage de l’evaporateur': ['chambre froide', 'negative', 'vitrine', 'congel', 'frigo', 'evaporateur'],
+    'bloc autonome': ['bloc', 'baes', 'eclairage de securite'],
+    'reservoir a vessie': ['surpresseur', 'ballon', 'vessie', 'reservoir'],
+    'circulateur bloque': ['circulateur', 'radiateur', 'chauffage'],
+    'bruleur en securite': ['bruleur', 'chaudiere', 'flamme', 'aerotherme gaz'],
+    'vase d’expansion': ['vase', 'chaudiere', 'chauffage', 'soupape', 'eau glacee'],
+    'fuite sur le circuit de chauffage': ['chaudiere', 'chauffage', 'radiateur', 'eau glacee', 'manque d eau'],
+    'variateur :': ['variateur'],
+    'condensateur de moteur monophase': ['monophase', 'condensateur', '230'],
+    'frein electromagnetique': ['frein'],
+    'sequence de demarrage etoile-triangle': ['etoile', 'triangle'],
+    'reseau de ventilation encrasse': ['vmc', 'bouche', 'extraction', 'ventilation'],
+    'courroie de ventilateur': ['courroie', 'cta', 'centrale', 'caisson', 'extracteur', 'ventilateur', 'soufflage'],
+    'defaut de degivrage': ['pac', 'pompe a chaleur', 'unite exterieure', 'degivrage', 'reversible'],
+    'vanne 4 voies': ['pac', 'pompe a chaleur', 'reversible', 'vanne 4', 'vanne quatre', 'mode chaud', 'clim'],
+    'porte coupe-feu': ['coupe feu', 'porte', 'compartimentage'],
+    'declencheur manuel': ['declencheur', 'dm ', 'bris de glace', 'alarme', 'rearm'],
+    'ligne de diffuseurs': ['diffuseur', 'sirene', 'sonne', 'evacuation'],
+    'compresseur d’air': ['compresseur'],
+    'bande de convoyeur': ['bande', 'tapis', 'convoyeur'],
+    'chaine de transmission': ['chaine', 'pignon'],
+    'pompe de relevage des condensats': ['pompe de relevage', 'cassette', 'gainable', 'relevage'],
+    'element chauffant coupe': ['four', 'resistance', 'etuve', 'chauffe eau', 'aerotherme', 'batterie electrique', 'cumulus', 'ballon', 'seche', 'convecteur', 'radiateur electrique', 'rideau d air'],
+    'minuterie ou telerupteur': ['minuterie', 'telerupteur', 'bouton', 'poussoir', 'lumiere', 'eclairage', 'communs'],
+    'bouton poussoir ou interrupteur de commande': ['lumiere', 'eclairage', 'lampe', 'interrupteur'],
+    'lampe, luminaire': ['luminaire', 'lampe', 'tube', 'neon', 'spot', 'eclairage', 'ampoule', 'led'],
+    'eclairage non commande': ['eclairage', 'lumiere', 'candelabre', 'lampadaire', 'projecteur']
+  };
+
+  DM.kbRegister('generic', [
+    H('Absence d’alimentation de l’équipement', 'Avant toute recherche approfondie, vérifier que l’équipement est bien alimenté.',
+      ['ne demarre', 'ne fonctionne', 'eteint', 'rien', 'hors service', 'pas de courant', 'aucun'],
+      [C('sous_tension', 'Mesurer la tension d’alimentation au plus près de l’équipement.', 'Tension nominale présente.')],
+      'Remonter vers l’amont jusqu’au point où la tension est présente (protection ouverte, fusible, connexion), traiter la cause de l’ouverture avant de réalimenter.'),
+    H('Conséquence d’une intervention récente', 'Une panne apparue juste après une intervention est souvent liée à celle-ci.',
+      ['depuis l intervention', 'depuis le remplacement', 'depuis les travaux', 'apres intervention', 'apres l intervention', 'apres remplacement', 'apres les travaux', 'depuis le changement', 'intervention', 'remplace', 'modif', 'travaux'],
+      [C('visuel', 'Recenser les interventions récentes (carnet, collègues) et vérifier ce qui a été modifié.', 'Aucune modification non documentée.')],
+      'Remettre en conformité ce qui a été modifié (raccordement, réglage, paramètre) et consigner la correction dans le carnet de maintenance.'),
+    H('Conditions environnementales', 'Humidité, chaleur, poussière ou orage peuvent déclencher des défauts.',
+      ['humid', 'eau', 'chaleur', 'orage', 'poussiere', 'gel', 'pluie', 'foudre'],
+      [C('visuel', 'Inspecter l’environnement de l’équipement (infiltrations, ventilation, propreté, traces de surtension).', 'Environnement conforme aux conditions d’utilisation.')],
+      'Supprimer la cause d’environnement (étanchéité, ventilation, protection contre les surtensions) et remettre en état les éléments atteints.')
+  ]);
 
   DM.findTemplate = function (id) {
     const type = String(id).split(':')[0];
     return (KB[type] || []).find(function (t) { return t.id === id; }) || null;
   };
+  /** Hypothèse type d'après sa cause (tous domaines). */
+  DM.findTemplateByCause = function (cause) {
+    const n = DM.normalize(cause);
+    let found = null;
+    Object.keys(KB).some(function (k) {
+      found = KB[k].find(function (t) { return DM.normalize(t.cause) === n; }) || null;
+      return !!found;
+    });
+    return found;
+  };
+
+  /* Domaines voisins : leurs pannes sont proposées quand plusieurs indices y conduisent
+   * (une pompe qui disjoncte peut avoir une panne de moteur ou d'armoire). */
+  const RELATED = {
+    electricite: [],
+    electrotechnique: ['moteur', 'electricite'],
+    moteur: ['electrotechnique', 'electricite'],
+    pompe: ['moteur', 'electrotechnique', 'electricite'],
+    hvac: ['electrotechnique', 'pompe', 'electricite', 'moteur'],
+    automatisme: ['electrotechnique', 'industriel'],
+    industriel: ['moteur', 'electrotechnique', 'automatisme'],
+    acces: [],
+    incendie: []
+  };
+  const RELATED_MIN_SCORE = 3;
+  const OTHER_MIN_SCORE = 4;
+
+  /** Le technicien a-t-il dit si le différentiel déclenche ? → true / false / null */
+  function differentialTrips(diag, text) {
+    const f = (diag.facts || []).find(function (x) { return /differentiel/.test(DM.normalize(x.question)); });
+    if (f) {
+      if (/^\s*non\b/i.test(f.answer)) return false;
+      if (/^\s*oui\b/i.test(f.answer)) return true;
+    }
+    if (/differentiel (\w+ ){0,2}(ne|n) (declenche|saute|tombe|disjoncte) pas/.test(text) || /pas le differentiel|sans le differentiel|differentiel ne bouge pas/.test(text)) return false;
+    return null;
+  }
+
+  /* Délai avant déclenchement : un déclenchement immédiat et un déclenchement après plusieurs minutes n'ont pas les mêmes causes. */
+  const DELAI = {
+    'court-circuit': 'immediat', 'sequence de demarrage etoile-triangle': 'immediat', 'protection inadaptee au courant d’appel': 'immediat', 'compresseur d’air qui demarre en charge': 'immediat',
+    'surcharge du circuit': 'differe', 'surcharge mecanique': 'differe', 'reglage du relais thermique': 'differe', 'echauffement de l’armoire': 'differe',
+    'surintensite : consommation excessive': 'differe', 'ventilation du moteur insuffisante': 'differe', 'condenseur encrasse': 'differe', 'variateur : surchauffe': 'differe'
+  };
+  function delaiOf(t) {
+    if (t.delai !== undefined) return t.delai;
+    const n = DM.normalize(t.cause);
+    const key = Object.keys(DELAI).find(function (k) { return n.indexOf(k) === 0; });
+    t.delai = key ? DELAI[key] : null;
+    return t.delai;
+  }
+  /** Le déclenchement est-il immédiat ou différé, d'après ce qu'a dit le technicien ? → 'immediat' / 'differe' / null */
+  function tripDelay(diag, text) {
+    const f = (diag.facts || []).find(function (x) { return /combien de temps/.test(DM.normalize(x.question)); });
+    const src = f ? DM.normText(f.answer) : text;
+    const now = /immediat|tout de suite|instantan|des qu on rearme|des le rearmement|a l enclenchement|des la mise sous tension| \d+ ?s(ec(onde)?s?)? /.test(src);
+    const later = / \d+ ?(min|mn|minutes?|h|heures?) |quelques minutes|apres un moment|une heure|deux heures|plus tard/.test(src);
+    if (now === later) return null;
+    return now ? 'immediat' : 'differe';
+  }
 
   /**
    * Propose des hypothèses d'après le type d'installation et les symptômes décrits.
@@ -372,13 +285,48 @@
     const answers = (diag.facts || []).map(function (f) { return f.answer; }).join(' ');
     const text = DM.normText([diag.name, diag.description, diag.symptoms, answers].join(' '));
     const existing = (diag.hypotheses || []).map(function (h) { return DM.normalize(h.cause); });
-    const pool = (KB[diag.installationType] || []).concat(KB.generic);
+    const type = diag.installationType;
+    const domains = Object.keys(KB).filter(function (k) { return k !== 'generic'; });
+    const unknown = type === 'autre' || !KB[type];
+    // domaines cités dans la description (« moteur de la pompe ») : leurs pannes comptent comme celles du domaine principal
+    const cited = DM.typeScores ? Object.keys(DM.typeScores(text)) : [];
+    const pool = [];
+    const seen = {};
+    function push(list, min, rank) {
+      (list || []).forEach(function (t) {
+        const key = DM.normalize(t.cause);
+        if (seen[key]) return;
+        seen[key] = true;
+        pool.push({ t: t, min: min, rank: rank });
+      });
+    }
+    push(KB[type], 0, 0);
+    push(KB.generic, 0, 0);
+    domains.forEach(function (k) { if (unknown || cited.indexOf(k) !== -1) push(KB[k], unknown ? 0 : 1, 1); });
+    (RELATED[type] || []).forEach(function (k) { push(KB[k], RELATED_MIN_SCORE, 2); });
+    // tout autre domaine : seulement sur un faisceau d'indices net
+    // (sécurité incendie et contrôle d’accès restent à part : leurs pannes ne concernent que leurs matériels)
+    domains.forEach(function (k) { if (k !== 'incendie' && k !== 'acces') push(KB[k], OTHER_MIN_SCORE, 3); });
+    const diff = differentialTrips(diag, text);
+    const delay = tripDelay(diag, text);
     return pool
-      .filter(function (t) { return existing.indexOf(DM.normalize(t.cause)) === -1; })
-      .map(function (t, i) {
-        const matched = t.keywords.filter(function (k) { return DM.hasKeyword(text, k); });
-        return { template: t, score: matched.length, matched: matched, order: i };
+      .filter(function (p) { return existing.indexOf(DM.normalize(p.t.cause)) === -1; })
+      .filter(function (p) { return !p.t.requis || p.t.requis.some(function (k) { return DM.hasKeyword(text, k); }); })
+      .map(function (p, i) {
+        let score = 0;
+        const matched = [];
+        p.t.keywords.forEach(function (k) {
+          const strong = k.charAt(0) === '+';
+          const word = strong ? k.slice(1) : k;
+          if (DM.hasKeyword(text, word)) { score += strong ? 3 : 1; matched.push(word); }
+        });
+        // le comportement du différentiel départage les causes « fuite à la terre » des causes « surintensité »
+        if (diff !== null && typeof p.t.diff === 'boolean' && p.t.diff !== diff) score = 0;
+        // de même pour le délai : un court-circuit ne met pas dix minutes à faire déclencher
+        if (delay && delaiOf(p.t) && delaiOf(p.t) !== delay) score = 0;
+        return { template: p.t, score: score, matched: score ? matched : [], order: i, min: p.min, rank: p.rank };
       })
-      .sort(function (a, b) { return b.score - a.score || a.order - b.order; });
+      .filter(function (x) { return x.score >= x.min; })
+      .sort(function (a, b) { return b.score - a.score || a.rank - b.rank || a.order - b.order; });
   };
 })(window.DM);

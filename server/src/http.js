@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const DM = require('./core');
 const { runAgentTurn } = require('./agent/run');
 
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8',
@@ -150,7 +150,7 @@ function createServer(deps) {
   function serveStatic(req, res, url) {
     if (!cfg.serveStatic || (req.method !== 'GET' && req.method !== 'HEAD')) { res.writeHead(404); return res.end(); }
     let rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
-    if (rel === '') rel = 'index.html';
+    if (rel === '' || rel.endsWith('/')) rel += 'index.html';
     // le code serveur, les données et les fichiers cachés ne sont jamais servis
     if (/^(server|node_modules)(\/|$)/i.test(rel) || rel.split('/').some(function (seg) { return seg.startsWith('.'); })) { res.writeHead(404); return res.end(); }
     const file = path.resolve(DM.ROOT, rel);

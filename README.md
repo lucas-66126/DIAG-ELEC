@@ -48,8 +48,9 @@ La clé reste sur le serveur : elle n'est jamais envoyée au navigateur ni versi
 Options utiles dans `.env` : `ANTHROPIC_MODEL`, `ANTHROPIC_EFFORT` (low → max), `WEB_SEARCH=false`,
 `AI_PROVIDER=local` (forcer le moteur local).
 
-Sans clé, l'application fonctionne avec le **moteur local** : il guide le diagnostic avec la base de pannes intégrée,
-mais n'analyse ni photos ni documents et ne cherche pas sur le Web.
+Sans clé, l'application fonctionne avec le **moteur local** : il guide le diagnostic avec la base de pannes intégrée
+(170 causes, 280 contrôles, une réparation conseillée par cause), mais n'analyse ni photos ni documents et ne cherche
+pas sur le Web. Voir « Base de pannes et banque de cas » plus bas.
 
 ## Utiliser depuis un téléphone
 
@@ -67,20 +68,44 @@ cd server
 npm test
 ```
 
-40 tests Node (modèle, agent, fournisseur Anthropic simulé, API HTTP) dont le **scénario Mitsubishi** complet
-avec une IA simulée et avec le moteur local. Tests navigateur de la logique métier : ouvrir
+49 tests Node (modèle, agent, fournisseur Anthropic simulé, API HTTP, banque de cas) dont le **scénario Mitsubishi**
+complet avec une IA simulée et avec le moteur local. Tests navigateur de la logique métier : ouvrir
 http://localhost:8787/tests/ (35 tests).
+
+## Base de pannes et banque de cas
+
+La base de pannes est décrite dans `js/pannes/` (un fichier par domaine). Chaque cause a ses mots-clés, ses contrôles
+(le dernier est celui qui confirme) et sa réparation conseillée.
+
+La **banque de cas** (`server/tests/cas/`) contient 192 pannes concrètes que le moteur local rejoue comme le ferait un
+technicien : une mesure n'est donnée que si l'application la demande, et tout ce que le cas ne prévoit pas est
+« rien d'anormal ». Un cas est réussi si la bonne cause est confirmée en 16 échanges au plus.
+
+```bash
+cd server
+npm run cas
+```
+
+`npm run cas -- pompe` joue un seul domaine ; `npm run cas -- ter-03 --detail` affiche le dialogue complet d'un cas.
+
+Pour enrichir la base : écrire le cas dans `server/tests/cas/`, le jouer, puis ajouter ou compléter la cause dans
+`js/pannes/`. Un cas résolu reste dans la banque : il ne doit plus jamais échouer (`npm test` le vérifie).
+
+Résultats mesurés le 2026-10-01 (détail dans `PROGRESS.md`) : 192 cas sur 192 une fois la base enrichie ; sur des cas
+jamais vus, joués une seule fois, **70 %** (contre 13 % avec la base de la veille).
 
 ## Structure
 
 ```
 index.html, css/, icons/, manifest.webmanifest, sw.js   interface (PWA)
 js/model.js, safety.js, knowledge.js, kb.js, report.js   cœur métier partagé (navigateur + serveur)
+js/pannes/                                               base de pannes, un fichier par domaine
 js/agent/tools.js, engine.js, local-provider.js          cœur de l'agent partagé
 js/agent/client.js, js/sync.js                           client de l'agent, file de synchronisation
 js/views/                                                écrans (agent = conversation, diag = arbre, rapport…)
 server/src/                                              serveur : HTTP, prompt système, fournisseurs d'IA, services
 server/tests/                                            tests Node
+server/tests/cas/                                        banque de cas et banc d'essai du moteur local
 tests/                                                   tests navigateur
 ```
 
