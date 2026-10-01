@@ -211,7 +211,17 @@
     app.render();
     if (!DM.store.persistent) DM.ui.toast('Stockage local indisponible : les données ne seront pas conservées.', 'error');
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-      navigator.serviceWorker.register('sw.js').catch(function (e) { console.warn('Service worker non enregistré', e); });
+      // quand une nouvelle version prend la main, la page est rechargée une fois pour l'afficher
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (!hadController || reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
+      navigator.serviceWorker.register('sw.js')
+        .then(function (reg) { return reg.update(); })
+        .catch(function (e) { console.warn('Service worker non enregistré', e); });
     }
     // état du serveur IA + envoi des diagnostics en attente de synchronisation
     if (DM.agentClient) DM.agentClient.health().then(function () { if (DM.sync) DM.sync.flush(); });

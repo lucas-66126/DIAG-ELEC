@@ -1,5 +1,5 @@
 @echo off
-title DIAG-MAINT V2
+title DIAG-MAINT
 cd /d "%~dp0server"
 where node >nul 2>nul
 if %errorlevel%==0 goto node
@@ -17,7 +17,9 @@ if not exist node_modules (
 if not exist .env (
   echo Astuce : copiez server\.env.example en server\.env et ajoutez votre cle ANTHROPIC_API_KEY pour activer l'IA.
 )
-start "" http://localhost:8787/
+rem Le navigateur est ouvert quelques secondes APRES le demarrage du serveur :
+rem ouvert trop tot, il affiche l'ancienne version gardee en memoire.
+start "" /b cmd /c "timeout /t 3 /nobreak >nul & start http://localhost:8787/"
 node src\index.js
 
 :end
