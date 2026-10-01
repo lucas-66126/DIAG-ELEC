@@ -72,10 +72,15 @@ class AnthropicProvider extends AIProvider {
     let res;
     try {
       const client = this.getClient();
-      if (this.cfg.fallbacks) {
-        res = await client.beta.messages.create(Object.assign({}, params, { betas: [FALLBACK_BETA], fallbacks: 'default' }));
+      const api = this.cfg.fallbacks ? client.beta.messages : client.messages;
+      const full = this.cfg.fallbacks ? Object.assign({}, params, { betas: [FALLBACK_BETA], fallbacks: 'default' }) : params;
+      if (req.onText && typeof api.stream === 'function') {
+        // diffusion : le texte de la réponse est transmis au fur et à mesure (le technicien lit pendant que l'IA finit)
+        const stream = api.stream(full);
+        stream.on('text', function (delta) { if (delta) req.onText(delta); });
+        res = await stream.finalMessage();
       } else {
-        res = await client.messages.create(params);
+        res = await api.create(full);
       }
     } catch (err) {
       throw mapError(err);

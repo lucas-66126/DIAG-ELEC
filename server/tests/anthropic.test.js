@@ -96,3 +96,27 @@ test('erreur API pendant un tour d’agent : propagée avec son code', async () 
   const p = new AnthropicProvider(loadConfig({ ANTHROPIC_API_KEY: 'k' }).anthropic, fakeClient(() => { throw sdkError(Anthropic.RateLimitError, 429, 'rate_limit_error'); }));
   await assert.rejects(DM.agent.runTurn({ provider: p, diag: d, system: 'x', services: {} }), (e) => e.code === 'rate_limit');
 });
+
+test('diffusion : avec onText, le fournisseur utilise le flux du SDK et transmet le texte', async () => {
+  const cfg = loadConfig({ ANTHROPIC_API_KEY: 'sk-test' }).anthropic;
+  const seen = [];
+  const params = [];
+  const client = {
+    beta: { messages: {
+      create: async () => { throw new Error('create ne doit pas être appelé'); },
+      stream: (p) => {
+        params.push(p);
+        const handlers = {};
+        return {
+          on(ev, cb) { handlers[ev] = cb; return this; },
+          finalMessage: async () => { handlers.text('Bon', 'Bon'); handlers.text('jour', 'Bonjour'); return OK(); }
+        };
+      }
+    } }
+  };
+  const p = new AnthropicProvider(cfg, client);
+  const out = await p.complete({ system: 'S', messages: [{ role: 'user', content: 'x' }], tools: [], onText: (d) => seen.push(d) });
+  assert.deepEqual(seen, ['Bon', 'jour']);
+  assert.equal(out.stop_reason, 'end_turn');
+  assert.equal(params[0].fallbacks, 'default');
+});

@@ -68,7 +68,7 @@ cd server
 npm test
 ```
 
-49 tests Node (modèle, agent, fournisseur Anthropic simulé, API HTTP, banque de cas) dont le **scénario Mitsubishi**
+56 tests Node (modèle, agent, fournisseur Anthropic simulé, API HTTP, banque de cas) dont le **scénario Mitsubishi**
 complet avec une IA simulée et avec le moteur local. Tests navigateur de la logique métier : ouvrir
 http://localhost:8790/tests/ (35 tests).
 

@@ -12,7 +12,7 @@ const MAX_PHOTOS_PER_TURN = 6;
  * @param {object} deps { providers, documents, knowledge, images, config }
  * @param {object} body { diag, images: {photoId: {mediaType, data}}, knowledge: [fiches locales] }
  */
-async function runAgentTurn(deps, body) {
+async function runAgentTurn(deps, body, onText) {
   if (!body || typeof body !== 'object' || !body.diag || typeof body.diag !== 'object') {
     throw Object.assign(DM.agent.AgentError('bad_request', 'Requête invalide : diagnostic manquant.', false), { status: 400 });
   }
@@ -46,7 +46,8 @@ async function runAgentTurn(deps, body) {
     system: SYSTEM_PROMPT,
     services: services,
     images: images,
-    maxIterations: deps.config.maxIterations
+    maxIterations: deps.config.maxIterations,
+    onText: onText || undefined
   });
   return {
     diag: out.diag,

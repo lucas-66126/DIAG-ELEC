@@ -218,7 +218,20 @@
     state.timer = setInterval(function () { const el = document.getElementById('typing-label'); if (el) el.textContent = typingLabel(); }, 1000);
     try {
       const d = load(id);
-      const out = await DM.agentClient.turn(d, opts);
+      // la réponse de l'IA s'affiche au fur et à mesure dans la bulle d'attente
+      const onText = function (text) {
+        const bubble = document.querySelector('#typing .bubble');
+        if (!bubble || !(DM.app.current && DM.app.current.name === 'agent' && DM.app.current.params.id === id)) return;
+        if (text) {
+          clearInterval(state.timer);
+          bubble.innerHTML = ui.md(text) + '<span class="dots dots--inline" aria-hidden="true"><i></i><i></i><i></i></span>';
+        } else {
+          bubble.innerHTML = '<span class="dots"><i></i><i></i><i></i></span> <span id="typing-label">' + esc('L’agent vérifie') + '…</span>';
+        }
+        const nearEnd = window.innerHeight + window.scrollY >= document.body.scrollHeight - 220;
+        if (nearEnd) window.scrollTo({ top: document.body.scrollHeight });
+      };
+      const out = await DM.agentClient.turn(d, Object.assign({ onText: onText }, opts || {}));
       DM.store.save(out.result.diag);
       if (out.fallback) ui.toast(out.fallback);
       if (out.remote) DM.sync.flush();

@@ -225,7 +225,12 @@
   };
   DM.rootHypotheses = function (d) { return d.hypotheses.filter(function (h) { return !h.parentControlId; }); };
   DM.hasResult = function (c) { return !!(c && c.doneAt && str(c.obtained)); };
-  DM.hypothesisHasResult = function (d, hid) { return DM.controlsOf(d, hid).some(DM.hasResult); };
+  /** Une hypothèse a un résultat si l'un de ses contrôles en a un, ou si elle est née du résultat d'un contrôle (hypothèse précisée). */
+  DM.hypothesisHasResult = function (d, hid) {
+    if (DM.controlsOf(d, hid).some(DM.hasResult)) return true;
+    const h = DM.findHyp(d, hid);
+    return !!(h && h.parentControlId && DM.hasResult(DM.findControl(d, h.parentControlId)));
+  };
   DM.measurementsOf = function (d, controlId) {
     return (d.measurements || []).filter(function (m) { return m.controlId === controlId; });
   };

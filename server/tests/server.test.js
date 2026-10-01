@@ -181,3 +181,39 @@ test('fichiers statiques : application servie, code serveur et fichiers cachés 
   }
   await s.close();
 });
+
+test('tour d’agent diffusé : texte au fil de l’eau, remise à zéro, résultat final ; erreur en ligne', async () => {
+  // fournisseur simulé qui « diffuse » : un premier texte, puis un second appel après un outil de recherche
+  const provider = () => {
+    let n = 0;
+    return {
+      name: 'fake', supportsTool: () => true,
+      complete: async (req) => {
+        n++;
+        if (n === 1) {
+          req.onText('Je regarde ');
+          req.onText('l’historique.');
+          return { content: [{ type: 'text', text: 'Je regarde l’historique.' }, toolUse('search_previous_diagnostics', { mode: 'similaire', text: 'clim' })], stop_reason: 'tool_use', usage: {} };
+        }
+        req.onText('Voici ma réponse complète.');
+        return { content: [{ type: 'text', text: 'Voici ma réponse complète.' }], stop_reason: 'end_turn', usage: {} };
+      }
+    };
+  };
+  const s = await start({}, provider);
+  const res = await fetch(s.base + '/api/agent/turn/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diag: diagWith('La clim ne refroidit plus') }) });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /ndjson/);
+  const events = (await res.text()).trim().split('\n').map(l => JSON.parse(l));
+  assert.deepEqual(events.slice(0, -1).map(e => e.t), ['text', 'text', 'reset', 'text']);
+  const done = events[events.length - 1];
+  assert.equal(done.t, 'done');
+  assert.equal(done.result.reply, 'Voici ma réponse complète.');
+  assert.equal(done.result.diag.messages.length, 2);
+
+  const bad = await fetch(s.base + '/api/agent/turn/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diag: DM.createDraft({}) }) });
+  const err = JSON.parse((await bad.text()).trim());
+  assert.equal(err.t, 'error');
+  assert.equal(err.error.code, 'no_user_message');
+  await s.close();
+});

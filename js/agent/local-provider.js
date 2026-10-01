@@ -50,7 +50,8 @@
     return out;
   };
 
-  const UNIT_RE = /([<>≥≤]\s*)?(?:(\d+(?:[.,]\d+)?)\s*(?:à|-)\s*)?(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
+  // (le début d'une plage ne peut pas être la fin d'un repère : « KM3 à 87 °C » n'est pas « 3 à 87 °C »)
+  const UNIT_RE = /([<>≥≤]\s*)?(?:(?<![A-Za-zÀ-ÿ0-9.,])(\d+(?:[.,]\d+)?)\s*(?:à|-)\s*)?(-?\d+(?:[.,]\d+)?)\s*(µF|uF|nF|GΩ|MΩ|kΩ|mΩ|Ω|Mohms?|kohms?|ohms?|mA|kA|A|mV|kV|V\s?AC|V\s?DC|VAC|VDC|V|kHz|Hz|°C|degr[ée]s?|bar|kPa|MPa|psi|kW|W|%)(?![A-Za-zÀ-ÿ0-9])/g;
   const UNIT_NORM = { uf: 'µF', ohm: 'Ω', ohms: 'Ω', kohm: 'kΩ', kohms: 'kΩ', mohm: 'MΩ', mohms: 'MΩ', vac: 'V AC', vdc: 'V DC', 'v ac': 'V AC', 'v dc': 'V DC',
     degre: '°C', degres: '°C', 'degré': '°C', 'degrés': '°C' };
 
@@ -465,7 +466,8 @@
           (e.text.match(/\b(?:KM|KA|K|Q|QF|F|X|BJ|BD|CJ)\d{1,3}\b/g) || []).forEach(function (t) { if (tags.indexOf(t) === -1) tags.push(t); });
         });
         const summary = h.cause + (tags.length ? ' — ' + tags.join(', ') : '');
-        calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'confirmee', justification: 'Confirmée par le technicien après des contrôles non conformes concordants.' } });
+        calls.push({ name: 'upsert_hypothesis', input: { id: h.id, status: 'confirmee', justification: 'Confirmée par le technicien après des contrôles non conformes concordants.',
+          direct_proof: 'Le contrôle de confirmation prévu pour cette cause est non conforme.' } });
         calls.push({ name: 'set_diagnosis_status', input: { status: 'confirme', summary: summary, missing: [] } });
         calls.push({ name: 'suggest_report', input: {} });
         notes.confirmed = h.id;

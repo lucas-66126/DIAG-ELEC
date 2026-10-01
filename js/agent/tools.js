@@ -152,7 +152,8 @@
           evidence_add: { type: 'array', items: { type: 'string' } },
           counter_evidence_add: { type: 'array', items: { type: 'string' } },
           parent_control_id: { type: 'string', description: 'Contrôle dont le résultat a fait naître cette hypothèse.' },
-          justification: { type: 'string', description: 'Justification du changement de statut.' }
+          justification: { type: 'string', description: 'Justification du changement de statut.' },
+          direct_proof: { type: 'string', description: 'Obligatoire pour confirmer sur un seul résultat de contrôle : en quoi ce résultat démontre directement la cause (mesure sur l’élément lui-même) et pourquoi aucune autre cause ne donnerait le même résultat.' }
         }
       }
     },
@@ -172,7 +173,21 @@
         }
         list(input.evidence_add).forEach(function (t) { DM.addEvidence(d, h.id, { text: t, source: 'agent' }); });
         list(input.counter_evidence_add).forEach(function (t) { DM.addEvidence(d, h.id, { text: t, source: 'agent', against: true }); });
-        if (input.status && input.status !== h.status) DM.concludeHypothesis(d, h.id, input.status, input.justification || '');
+        // un seul résultat ne confirme une cause que s'il la démontre directement : l'IA doit le justifier,
+        // sinon elle propose d'abord un contrôle de confirmation
+        const proofs = DM.controlsOf(d, h.id).filter(DM.hasResult).length +
+          (h.parentControlId && DM.hasResult(DM.findControl(d, h.parentControlId)) ? 1 : 0);
+        if (input.status === 'confirmee' && h.status !== 'confirmee' && !proofs) {
+          return fail('Impossible de confirmer « ' + h.cause + ' » : aucun résultat de contrôle ne lui est rattaché. Si elle précise une piste existante ' +
+            'dont un contrôle vient de donner le résultat, renomme cette piste (upsert_hypothesis avec son id et la nouvelle cause) au lieu d’en créer une autre, ' +
+            'ou crée-la avec parent_control_id = ce contrôle.');
+        }
+        if (input.status === 'confirmee' && h.status !== 'confirmee' && !s(input.direct_proof) && proofs === 1) {
+          return fail('Un seul résultat de contrôle appuie « ' + h.cause + ' ». S’il n’est qu’un indice (thermographie, observation, corrélation), ' +
+            'laisse l’hypothèse « suspectee », mets le verdict à « probable » et propose le contrôle qui la démontre directement. ' +
+            'S’il la démontre à lui seul, confirme en renseignant direct_proof.');
+        }
+        if (input.status && input.status !== h.status) DM.concludeHypothesis(d, h.id, input.status, [input.justification, input.direct_proof].filter(Boolean).join(' — '));
       } catch (e) { return fail(e.message); }
       const S = DM.HYP_STATUS[h.status];
       return ok({ id: h.id, cause: h.cause, status: h.status, evidence: h.evidence.length, counter_evidence: h.counterEvidence.length },
@@ -191,6 +206,7 @@
         type: 'object',
         properties: {
           hypothesis_id: { type: 'string', description: 'Hypothèse que ce contrôle permet de départager (facultatif).' },
+          hypothesis_cause: { type: 'string', description: 'À la place de hypothesis_id, pour une hypothèse créée dans le même message : sa cause, recopiée à l’identique.' },
           description: { type: 'string', description: 'Ce qu’il faut faire, précisément (point de mesure, appareil).' },
           type: { type: 'string', enum: CONTROL_TYPES },
           expected: { type: 'string', description: 'Résultat attendu. Ne jamais inventer de valeur constructeur : écrire « selon plaque/notice » si inconnue.' },
@@ -204,6 +220,10 @@
     run: function (input, ctx) {
       const d = ctx.diag;
       if (CONTROL_TYPES.indexOf(input.type) === -1) return fail('type invalide.');
+      if (!input.hypothesis_id && s(input.hypothesis_cause)) {
+        const byCause = d.hypotheses.find(function (x) { return DM.normalize(x.cause) === DM.normalize(input.hypothesis_cause); });
+        if (byCause) input = Object.assign({}, input, { hypothesis_id: byCause.id });
+      }
       if (input.hypothesis_id && !DM.findHyp(d, input.hypothesis_id)) return fail('Hypothèse ' + input.hypothesis_id + ' introuvable.');
       const same = d.controls.find(function (c) { return overlap(c.description, input.description) >= 0.8; });
       if (same && DM.hasResult(same)) {

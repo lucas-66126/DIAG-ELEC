@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const DM = require('./core');
 const { runAgentTurn } = require('./agent/run');
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8',
@@ -109,6 +109,22 @@ function createServer(deps) {
       const body = await readBody(req, maxBody);
       const out = await runAgentTurn(deps, body);
       return send(res, 200, out);
+    }
+
+    // Même tour, diffusé : une ligne JSON par événement — {t:"text",d:"…"} · {t:"reset"} · {t:"done",result} · {t:"error",error}
+    if (p === '/api/agent/turn/stream' && m === 'POST') {
+      const body = await readBody(req, maxBody);
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      const line = function (o) { res.write(JSON.stringify(o) + '\n'); };
+      try {
+        const out = await runAgentTurn(deps, body, function (delta) { line(delta === null ? { t: 'reset' } : { t: 'text', d: delta }); });
+        line({ t: 'done', result: out });
+      } catch (err) {
+        const code = err.code || 'internal';
+        if ((err.status || ERROR_STATUS[code] || 500) >= 500) console.error('[DIAG-MAINT]', code, err.message);
+        line({ t: 'error', error: { code: code, message: err.message || 'Erreur', retryable: !!err.retryable } });
+      }
+      return res.end();
     }
 
     if (p === '/api/documents' && m === 'GET') {

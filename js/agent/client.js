@@ -46,6 +46,56 @@
     return body;
   }
 
+  /**
+   * Tour diffusé : le serveur envoie une ligne JSON par événement ; onText(texte) reçoit la réponse au fur et à mesure.
+   * Renvoie le résultat final, ou null si le serveur ne connaît pas cette route (ancienne version).
+   */
+  async function streamTurn(body, onText) {
+    const url = serverUrl();
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 5 * 60 * 1000) : null;
+    let res;
+    try {
+      res = await fetch(url + '/api/agent/turn/stream', { method: 'POST', headers: headers(), body: JSON.stringify(body), signal: ctrl && ctrl.signal });
+    } catch (e) {
+      if (timer) clearTimeout(timer);
+      throw DM.agent.AgentError(e && e.name === 'AbortError' ? 'timeout' : 'network',
+        e && e.name === 'AbortError' ? 'Le serveur ne répond pas (délai dépassé).' : 'Serveur injoignable.', true);
+    }
+    try {
+      if (res.status === 404 || !res.body || !res.body.getReader) return null;
+      if (!res.ok) {
+        let b = null;
+        try { b = await res.json(); } catch (e) { b = null; }
+        const err = b && b.error ? b.error : { code: 'http_' + res.status, message: 'Erreur serveur (' + res.status + ').' };
+        throw DM.agent.AgentError(err.code, err.message, !!err.retryable);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '', shown = '', result = null;
+      const handle = function (lineText) {
+        if (!lineText.trim()) return;
+        const ev = JSON.parse(lineText);
+        if (ev.t === 'text') { shown += ev.d; onText(shown); }
+        else if (ev.t === 'reset') { shown = ''; onText(''); }
+        else if (ev.t === 'done') result = ev.result;
+        else if (ev.t === 'error') throw DM.agent.AgentError(ev.error.code, ev.error.message, !!ev.error.retryable);
+      };
+      for (;;) {
+        let chunk;
+        try { chunk = await reader.read(); }
+        catch (e) { throw DM.agent.AgentError('network', 'Connexion au serveur interrompue.', true); }
+        if (chunk.done) break;
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let nl;
+        while ((nl = buffer.indexOf('\n')) !== -1) { handle(buffer.slice(0, nl)); buffer = buffer.slice(nl + 1); }
+      }
+      handle(buffer);
+      if (!result) throw DM.agent.AgentError('network', 'Réponse du serveur incomplète.', true);
+      return result;
+    } finally { if (timer) clearTimeout(timer); }
+  }
+
   DM.agentClient = {
     serverUrl: serverUrl,
 
@@ -110,7 +160,8 @@
         if (DM.agentClient.willUseServer()) {
           try {
             const body = { diag: d, images: await DM.agentClient.imagesFor(d), knowledge: DM.agentClient.knowledgeDigest(d.id) };
-            const result = await fetchJson('/api/agent/turn', { method: 'POST', body: JSON.stringify(body) }, 5 * 60 * 1000);
+            let result = opts.onText ? await streamTurn(body, opts.onText) : null;
+            if (!result) result = await fetchJson('/api/agent/turn', { method: 'POST', body: JSON.stringify(body) }, 5 * 60 * 1000);
             return { result: result, remote: true, fallback: null };
           } catch (e) {
             // réseau coupé en cours de route : on bascule sur le moteur local plutôt que de bloquer le technicien

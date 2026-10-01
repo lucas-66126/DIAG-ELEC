@@ -56,9 +56,21 @@ plus bas. Chaque échec devient un cas de la banque et une cause de plus dans la
 - Le banc d'essai répond « rien d'anormal » à tout contrôle non prévu : il ne mesure pas la qualité des questions,
   seulement l'aboutissement au bon diagnostic.
 
+## V2.2 — Première utilisation de la vraie IA et corrections (2026-10-02)
+- ✅ Clé Anthropic en place ; les trois cas détaillés (convoyeur, CPI en régime IT, SSI) rejoués avec Claude : trois bonnes causes.
+- ✅ Vitesse : la réponse s'affiche au fil de l'eau (`/api/agent/turn/stream`), l'IA répond en un seul appel (texte puis outils),
+  l'historique similaire est joint d'office au premier message, réponses plus courtes.
+  Mesuré : texte complet en 8 à 14 s, contre 22 à 54 s d'attente à vide auparavant.
+- ✅ Confirmation : un indice (thermographie, observation) laisse le verdict « probable » ; un seul résultat ne confirme qu'avec une
+  preuve directe (`direct_proof`). Une piste précisée garde ses contrôles et ses preuves.
+- ✅ Mesures : toutes les valeurs données en réponse à un contrôle sont au relevé, même si l'IA n'en enregistre qu'une partie.
+- ✅ Réponse jamais réduite à la seule question ; un texte écrit avant un outil refusé n'est pas affiché tel quel.
+- ✅ Serveur local sur le port 8790 ; le lanceur ouvre le navigateur après le démarrage du serveur.
+- ✅ Tests : 56 Node + 35 navigateur.
+
 ## Restant à connecter / limites connues
-- 🔌 **Clé Anthropic** : sans elle, pas d'IA réelle (analyse de photos, lecture de PDF, recherche Web).
-  Le comportement de Claude a été testé avec un fournisseur simulé, pas avec l'API réelle.
+- ✅ **Clé Anthropic** en place sur le PC (fichier `server/.env`, jamais versionné). Non testés avec la vraie IA :
+  analyse de photos, lecture de PDF, recherche Web.
 - 🔌 **Hébergement HTTPS** du serveur pour un usage mobile hors du réseau local.
 - ⬜ `OpenAIProvider` : squelette seulement (traduction du format à écrire).
 - ⬜ Synchronisation complète multi-appareils (seule la base de connaissances est synchronisée).

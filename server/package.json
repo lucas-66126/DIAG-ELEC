@@ -1,6 +1,6 @@
 {
   "name": "diag-maint-server",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "DIAG-MAINT V2 — serveur de l'agent IA de diagnostic (API + fichiers statiques)",
   "private": true,
   "main": "src/index.js",

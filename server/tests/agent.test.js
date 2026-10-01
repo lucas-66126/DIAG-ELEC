@@ -494,3 +494,97 @@ test('moteur local : « je ne sais pas » et piste écartée par un résultat co
   const h = DM.findHyp(d, next.hypothesisId);
   assert.ok(h.counterEvidence.length >= 1);
 });
+
+/* ---------- V2.2 : réponse en un seul passage, preuve directe, relevé complet des mesures ---------- */
+const say = (t) => ({ type: 'text', text: t });
+
+test('réponse en un seul passage : texte + outils + question dans le même message, un seul appel à l’IA', async () => {
+  const d = userSays(newDiag(), 'Le contacteur KM1 ne colle plus.');
+  const p = scriptedProvider([
+    tools(
+      say('C’est noté : KM1 ne colle plus. **Contrôle n°1 :** mesure la tension aux bornes A1-A2 à l’ordre de marche.'),
+      toolUse('upsert_hypothesis', { cause: 'Bobine de KM1 coupée', reason: 'ne colle plus' }),
+      toolUse('propose_control', { hypothesis_cause: 'Bobine de KM1 coupée', description: 'Mesurer la tension aux bornes A1-A2 de KM1 à l’ordre de marche', type: 'sous_tension', why: 'savoir si la bobine est alimentée' }),
+      toolUse('ask_user', { question: 'Quelle tension mesures-tu sur A1-A2 ?', kind: 'result' })
+    ),
+    text('(ne doit pas être demandé)')
+  ]);
+  const out = await DM.agent.runTurn({ provider: p, diag: d, services: {} });
+  assert.equal(p.requests.length, 1, 'aucun second appel');
+  assert.match(out.reply, /Contrôle n°1/);
+  assert.match(out.reply, /Quelle tension mesures-tu/, 'la question est ajoutée si elle manque au texte');
+  assert.equal(out.diag.controls[0].hypothesisId, out.diag.hypotheses[0].id, 'contrôle rattaché par la cause');
+  assert.equal(out.diag.messages[out.diag.messages.length - 1].controlId, out.diag.controls[0].id);
+});
+
+test('réponse en un seul passage : si un outil est refusé, l’IA est rappelée pour corriger', async () => {
+  const d = newDiag();
+  const h = DM.addHypothesis(d, { cause: 'Condensateur HS' });
+  userSays(d, 'c’est sûrement le condensateur');
+  const p = scriptedProvider([
+    tools(
+      say('Le condensateur est en cause, je confirme le diagnostic et tu peux le remplacer dès maintenant.'),
+      toolUse('upsert_hypothesis', { id: h.id, status: 'confirmee' }),
+      toolUse('ask_user', { question: 'Tu as un condensateur de rechange ?', kind: 'fact' })
+    ),
+    text('Pas encore : mesure d’abord sa capacité.')
+  ]);
+  const out = await DM.agent.runTurn({ provider: p, diag: d, services: {} });
+  assert.equal(p.requests.length, 2, 'le refus de l’outil renvoie à l’IA');
+  assert.match(out.reply, /Pas encore/);
+  assert.equal(DM.findHyp(out.diag, h.id).status, 'possible');
+});
+
+test('réponse réduite à la question : l’explication écrite avant les outils est rendue', async () => {
+  const d = userSays(newDiag(), 'Une vis traverse le câble de boucle.');
+  const explication = 'La cause est trouvée : la vis du rail traverse le câble de boucle et le met à la masse de la charpente. Il faudra remplacer le tronçon.';
+  const p = scriptedProvider([
+    tools(say(explication), toolUse('search_previous_diagnostics', { mode: 'similaire', text: 'câble de boucle' })),
+    tools(toolUse('ask_user', { question: 'Dans quel état sont les conducteurs ?', kind: 'result' })),
+    text('Dans quel état sont les conducteurs ?')
+  ]);
+  const out = await DM.agent.runTurn({ provider: p, diag: d, services: { knowledge: kbService } });
+  assert.match(out.reply, /La cause est trouvée/);
+  assert.match(out.reply, /Dans quel état sont les conducteurs \?$/);
+});
+
+test('confirmation sur un seul résultat : refusée sans preuve directe, acceptée avec', async () => {
+  const d = newDiag();
+  d.installationType = 'electrotechnique';
+  const h = DM.addHypothesis(d, { cause: 'Pôle de KM3 dégradé' });
+  const c = DM.addControl(d, { hypothesisId: h.id, type: 'sous_tension', description: 'Thermographie de l’armoire en charge' });
+  DM.recordResult(d, c.id, { obtained: 'un pôle de KM3 à 87 °C', verdict: 'non_conforme' }, { declaredInChat: true });
+  userSays(d, 'suite');
+  const p = scriptedProvider([
+    tools(toolUse('upsert_hypothesis', { id: h.id, status: 'confirmee' })),
+    (req) => {
+      const r = lastToolResults(req)[0];
+      assert.equal(r.is_error, true);
+      assert.match(r.content, /Un seul résultat/);
+      return tools(toolUse('upsert_hypothesis', { id: h.id, status: 'confirmee', direct_proof: 'Chute de tension de 3,7 V mesurée sur ce pôle' }));
+    },
+    text('Confirmé.')
+  ]);
+  const out = await DM.agent.runTurn({ provider: p, diag: d, services: {} });
+  assert.equal(DM.findHyp(out.diag, h.id).status, 'confirmee');
+  assert.match(DM.findHyp(out.diag, h.id).conclusion, /3,7 V/);
+});
+
+test('relevé des mesures : toutes les valeurs données pour le contrôle demandé sont enregistrées', async () => {
+  const d = newDiag();
+  d.installationType = 'moteur';
+  const c = DM.addControl(d, { type: 'sous_tension', description: 'Mesurer le courant de chaque phase à la pince ampèremétrique', proposedBy: 'agent' });
+  DM.addMessage(d, { role: 'assistant', text: 'Contrôle n°1', ask: { question: 'Quels courants ?', choices: [], kind: 'result', controlId: c.id }, controlId: c.id });
+  userSays(d, 'Au mégohmmètre 500 V rien à signaler. Courants : L1 : 20,1 A · L2 : 20,6 A · L3 : 26,4 A');
+  // l'IA n'enregistre que la valeur qui l'intéresse
+  const p = scriptedProvider([
+    tools(toolUse('save_measurement', { kind: 'courant', label: 'Courant L3', value: '26,4', unit: 'A', control_id: c.id })),
+    text('L3 est trop élevé.')
+  ]);
+  const out = await DM.agent.runTurn({ provider: p, diag: d, services: {} });
+  const amps = out.diag.measurements.filter(m => m.unit === 'A');
+  assert.deepEqual(amps.map(m => m.value).sort(), ['20,1', '20,6', '26,4']);
+  assert.ok(amps.every(m => m.controlId === c.id));
+  assert.ok(!out.diag.measurements.some(m => m.unit === 'V'), 'la tension d’essai n’est pas une mesure de ce contrôle');
+  assert.equal(out.trace.filter(t => t.label === 'Mesure enregistrée').length, 3);
+});

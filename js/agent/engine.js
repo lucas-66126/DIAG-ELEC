@@ -11,8 +11,20 @@
   DM.agent = DM.agent || {};
   const HISTORY_LIMIT = 30;       // messages de conversation renvoyés à l'IA (l'état complet est dans l'instantané)
   const MAX_ITERATIONS = 14;
+  const LOOKUP_TOOLS = ['search_previous_diagnostics', 'search_documentation', 'read_document', 'analyze_image'];  // leur résultat doit être lu par l'IA
+  const MIN_DIRECT_REPLY = 60;    // en dessous, le texte est une simple transition, pas la réponse
+  const SHORT_REPLY = 220;        // une réponse plus courte est probablement réduite à la question
 
   function s(v) { return v == null ? '' : String(v).trim(); }
+
+  /** La fin de la réponse pose-t-elle déjà la question (mêmes mots, ou une phrase interrogative) ? */
+  function asksAlready(reply, question) {
+    if (reply.indexOf(question) !== -1 || /\?\s*\**\s*$/.test(reply)) return true;
+    const tail = DM.normText(reply.slice(-350));
+    const words = DM.normText(question).trim().split(' ').filter(function (w) { return w.length > 3; });
+    if (words.length < 3) return false;
+    return words.filter(function (w) { return tail.indexOf(' ' + w) !== -1; }).length / words.length >= 0.6;
+  }
 
   /** Erreur normalisée renvoyée au client (code stable + message en français). */
   DM.agent.AgentError = function (code, message, retryable) {
@@ -189,12 +201,33 @@
     const turn = { ask: null, trace: [], attachments: [], suggestReport: false, proposedControlId: null };
     const ctx = { diag: d, turn: turn, services: services, userText: current.text };
     const messages = DM.agent.buildMessages(d, p.images);
+    // Premier message : l'historique des pannes similaires est joint d'office, pour éviter à l'IA un aller-retour de recherche.
+    if (provider.name !== 'local' && services.knowledge && DM.kb && d.messages.filter(function (m) { return m.role === 'user'; }).length === 1) {
+      try {
+        const entries = await services.knowledge.entries();
+        const found = DM.kb.search(entries, { mode: 'similaire', text: current.text, installationType: d.installationType, brand: d.brand, excludeDiagId: d.id, limit: 3 });
+        const last = messages[messages.length - 1];
+        last.content.push({ type: 'text', text: '<historique_similaire>\n' + (found.length
+          ? found.map(function (r) { return '- ' + DM.kb.summary(r.entry) + ' [' + r.why.join(', ') + ']'; }).join('\n')
+          : 'Aucun diagnostic antérieur similaire.') + '\n</historique_similaire>' });
+        turn.trace.push({ kind: 'knowledge', label: 'Recherche dans l’historique (' + DM.KB_MODES.similaire + ')', detail: found.length ? DM.plural(found.length, 'résultat') : 'aucun résultat' });
+      } catch (e) { /* historique indisponible : l'IA peut toujours le chercher elle-même */ }
+    }
     const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
     const max = p.maxIterations || MAX_ITERATIONS;
     let reply = '', i = 0, finalContent = [];
+    const turnStart = new Date().toISOString();
+    const preTexts = [];   // textes écrits par l'IA en même temps que ses appels d'outils
+    // contrôle dont le technicien était censé donner le résultat (question du message précédent)
+    const prevAssistant = d.messages.slice(0, -1).reverse().find(function (m) { return m.role === 'assistant'; });
+    const awaitedControlId = prevAssistant && prevAssistant.ask && prevAssistant.ask.kind === 'result'
+      ? (prevAssistant.ask.controlId || prevAssistant.controlId || null) : null;
 
     for (i = 1; i <= max; i++) {
-      const res = await provider.complete({ system: p.system || '', messages: messages, tools: tools, context: { diag: d, turn: turn } });
+      // diffusion du texte au fil de l'eau : à chaque nouvel appel à l'IA, le texte déjà affiché est remplacé
+      if (p.onText && i > 1) p.onText(null);
+      const res = await provider.complete({ system: p.system || '', messages: messages, tools: tools, context: { diag: d, turn: turn },
+        onText: p.onText ? function (delta) { p.onText(delta); } : undefined });
       ['input_tokens', 'output_tokens', 'cache_read_input_tokens'].forEach(function (k) { usage[k] += (res.usage && res.usage[k]) || 0; });
       const content = res.content || [];
       content.forEach(function (b) { const t = serverTrace(b, content); if (t) turn.trace.push(t); });
@@ -213,14 +246,35 @@
         messages.push({ role: 'assistant', content: content });
         const results = [];
         turn.attachments = [];
+        let anyError = false;
         for (const tu of toolUses) {
           const out = await DM.agent.runTool(tu.name, tu.input, ctx);
           if (out.trace) turn.trace.push(out.trace);
+          if (out.isError) anyError = true;
           if (p.onEvent) p.onEvent({ type: 'tool', name: tu.name, isError: !!out.isError });
           results.push({ type: 'tool_result', tool_use_id: tu.id, content: out.content, is_error: out.isError || undefined });
         }
+        // Réponse en un seul passage : l'IA a écrit sa réponse puis appelé tous ses outils, dont la question finale.
+        // Si aucun outil n'a été refusé et qu'aucun ne rapporte une information à lire, inutile de la rappeler.
+        const said = content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('').trim();
+        if (said) preTexts.push(said);
+        const closes = toolUses.some(function (tu) { return tu.name === 'ask_user' || tu.name === 'suggest_report'; });
+        const reads = toolUses.some(function (tu) { return LOOKUP_TOOLS.indexOf(tu.name) !== -1; });
+        if (said.length >= MIN_DIRECT_REPLY && closes && !reads && !anyError) {
+          finalContent = content;
+          reply = said;
+          if (turn.ask && turn.ask.question && !asksAlready(reply, turn.ask.question)) reply += '\n\n' + turn.ask.question;
+          break;
+        }
         // documents ouverts par read_document : joints après les résultats d'outils
-        messages.push({ role: 'user', content: results.concat(turn.attachments) });
+        const followUp = results.concat(turn.attachments);
+        // le texte écrit avec ces appels d'outils n'est pas affiché : l'IA doit rendre une réponse complète au tour suivant
+        if (said) {
+          followUp.push({ type: 'text', text: (anyError ? 'Un outil a été refusé : corrige ce qui doit l’être. ' : '') +
+            'Le texte que tu as écrit avant ces appels d’outils n’a PAS été montré au technicien. Écris maintenant ta réponse complète pour lui ' +
+            '(ce que tu retiens, le prochain contrôle ou la conclusion, la question), cohérente avec l’état réellement enregistré.' });
+        }
+        messages.push({ role: 'user', content: followUp });
         continue;
       }
       if (res.stop_reason === 'max_tokens') throw DM.agent.AgentError('truncated', 'Réponse de l’IA tronquée (limite de longueur).', true);
@@ -239,6 +293,33 @@
       else turn.trace.push({ kind: 'web', label: 'Sources citées', detail: '', sources: sources });
     }
     if (!reply) reply = turn.ask ? turn.ask.question : 'D’accord.';
+    // l'explication a parfois été écrite avant les appels d'outils, et la réponse finale réduite à la question :
+    // on rend alors l'explication, suivie de la question
+    const best = preTexts.reduce(function (a, b) { return b.length > a.length ? b : a; }, '');
+    if (best && reply.length < SHORT_REPLY && best.length > 2 * reply.length && best.indexOf(reply) === -1) reply = best + '\n\n' + reply;
+
+    // Toutes les valeurs données en réponse à un contrôle sont au relevé, même si l'IA n'en a enregistré qu'une partie.
+    if (provider.name !== 'local' && awaitedControlId && DM.agent.parseMeasurements) {
+      const ctl = DM.findControl(d, awaitedControlId);
+      const family = function (k) { return k === 'isolement' ? 'resistance' : k; };
+      const digits = function (v) { return String(v).replace(',', '.').replace(/[^0-9.]/g, ''); };
+      const kinds = ctl ? DM.controlMeasureKinds(ctl).map(family) : [];
+      if (kinds.length) {
+        DM.agent.parseMeasurements(current.text).forEach(function (m) {
+          const kind = DM.kindFromUnit(m.unit);
+          if (kinds.indexOf(family(kind)) === -1) return;
+          const known = d.measurements.some(function (x) {
+            return (x.at >= turnStart || x.controlId === ctl.id) && digits(x.value) === digits(m.value) && DM.normalize(x.unit) === DM.normalize(m.unit);
+          });
+          if (known) return;
+          const added = DM.addMeasurement(d, {
+            kind: kind, label: (m.label ? m.label + ' — ' : '') + ctl.description.slice(0, 60), value: m.value, unit: m.unit,
+            controlId: ctl.id, source: 'technicien', comment: 'Relevée automatiquement dans le message du technicien'
+          });
+          turn.trace.push({ kind: 'measurement', label: 'Mesure enregistrée', detail: DM.formatMeasurement(added) });
+        });
+      }
+    }
     // compléments propres au fournisseur (ex. moteur local : identifiant de question, hypothèse à confirmer)
     if (provider.extraAsk && turn.ask) Object.assign(turn.ask, provider.extraAsk);
 
