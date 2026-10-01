@@ -26,7 +26,7 @@ Architecture : voir [ARCHITECTURE.md](ARCHITECTURE.md). Avancement : [PROGRESS.m
 ## Lancer
 
 **Windows** : double-cliquer sur `LANCER-DIAG-MAINT.bat` (installe les dépendances la première fois, démarre le
-serveur et ouvre http://localhost:8787).
+serveur et ouvre http://localhost:8790).
 
 Ou en ligne de commande :
 
@@ -55,7 +55,7 @@ pas sur le Web. Voir « Base de pannes et banque de cas » plus bas.
 ## Utiliser depuis un téléphone
 
 - **Même réseau Wi-Fi** : dans `server/.env`, mettre `HOST=0.0.0.0` et un `APP_ACCESS_TOKEN` (obligatoire),
-  puis ouvrir `http://<adresse-du-PC>:8787` sur le téléphone et saisir le jeton dans *Réglages → Serveur IA*.
+  puis ouvrir `http://<adresse-du-PC>:8790` sur le téléphone et saisir le jeton dans *Réglages → Serveur IA*.
   (Sans HTTPS, l'installation sur l'écran d'accueil et la dictée peuvent être limitées.)
 - **En déplacement** : héberger le dossier `server/` chez un hébergeur Node.js (HTTPS), avec les mêmes variables
   d'environnement. Le site GitHub Pages peut aussi servir d'interface : renseigner l'adresse du serveur dans
@@ -70,7 +70,7 @@ npm test
 
 49 tests Node (modèle, agent, fournisseur Anthropic simulé, API HTTP, banque de cas) dont le **scénario Mitsubishi**
 complet avec une IA simulée et avec le moteur local. Tests navigateur de la logique métier : ouvrir
-http://localhost:8787/tests/ (35 tests).
+http://localhost:8790/tests/ (35 tests).
 
 ## Base de pannes et banque de cas
 

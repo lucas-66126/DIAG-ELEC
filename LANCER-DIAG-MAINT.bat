@@ -19,7 +19,7 @@ if not exist .env (
 )
 rem Le navigateur est ouvert quelques secondes APRES le demarrage du serveur :
 rem ouvert trop tot, il affiche l'ancienne version gardee en memoire.
-start "" /b cmd /c "timeout /t 3 /nobreak >nul & start http://localhost:8787/"
+start "" /b cmd /c "timeout /t 3 /nobreak >nul & start http://localhost:8790/"
 node src\index.js
 
 :end

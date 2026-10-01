@@ -29,7 +29,7 @@ function loadConfig(env) {
   let provider = (env.AI_PROVIDER || 'auto').toLowerCase();
   if (provider === 'auto') provider = hasAnthropicCredentials ? 'anthropic' : (env.OPENAI_API_KEY ? 'openai' : 'local');
   return {
-    port: int(env.PORT, 8787),
+    port: int(env.PORT, 8790),
     host: env.HOST || '127.0.0.1',
     provider: provider,
     anthropic: {
