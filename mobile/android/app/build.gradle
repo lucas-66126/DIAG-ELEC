@@ -28,6 +28,7 @@ android {
         release {
             if (keystorePath) {
                 storeFile file(keystorePath)
+                storeType "pkcs12"
                 storePassword System.getenv("DIAGMAINT_KEYSTORE_PASSWORD")
                 keyAlias System.getenv("DIAGMAINT_KEY_ALIAS")
                 keyPassword System.getenv("DIAGMAINT_KEY_PASSWORD")
