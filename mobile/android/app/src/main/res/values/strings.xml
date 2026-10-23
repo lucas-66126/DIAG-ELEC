@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">DIAG-MAINT</string>
     <string name="title_activity_main">DIAG-MAINT</string>
-    <string name="package_name">com.cadrio.diagmaint</string>
-    <string name="custom_url_scheme">com.cadrio.diagmaint</string>
+    <string name="package_name">com.tanivel.diagmaint</string>
+    <string name="custom_url_scheme">com.tanivel.diagmaint</string>
 </resources>

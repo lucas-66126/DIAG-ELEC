@@ -9,10 +9,10 @@ def (vMajor, vMinor, vPatch) = appVersion.tokenize('.').collect { it as int }
 def keystorePath = System.getenv("DIAGMAINT_KEYSTORE_FILE")
 
 android {
-    namespace = "com.cadrio.diagmaint"
+    namespace = "com.tanivel.diagmaint"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.cadrio.diagmaint"
+        applicationId "com.tanivel.diagmaint"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode vMajor * 10000 + vMinor * 100 + vPatch

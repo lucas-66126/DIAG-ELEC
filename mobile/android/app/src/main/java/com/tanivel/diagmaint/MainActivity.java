@@ -1,4 +1,4 @@
-package com.cadrio.diagmaint;
+package com.tanivel.diagmaint;
 
 import com.getcapacitor.BridgeActivity;
 
