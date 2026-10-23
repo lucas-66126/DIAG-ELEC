@@ -1,4 +1,4 @@
-package io.github.lucas66126.diagmaint;
+package com.cadrio.diagmaint;
 
 import com.getcapacitor.BridgeActivity;
 

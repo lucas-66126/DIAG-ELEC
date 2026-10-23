@@ -5,7 +5,7 @@
 | Champ | Valeur proposée |
 |---|---|
 | Nom de l'application (30 caractères max) | DIAG-MAINT : diagnostic pannes |
-| Identifiant (définitif après la première publication) | `io.github.lucas66126.diagmaint` |
+| Identifiant (définitif après la première publication) | `com.cadrio.diagmaint` |
 | Langue par défaut | Français (France) |
 | Catégorie | Outils (ou Professionnel) |
 | Type | Application, gratuite |
